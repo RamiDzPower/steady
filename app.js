@@ -1128,8 +1128,9 @@ function closeSheet() {
   if (!s.open || s.classList.contains('closing')) return;
   s.classList.add('closing');
   const done = (e) => {
-    // The backdrop's fade ends first and reports on the dialog too; wait for the sheet's own slide.
-    if (e && (e.target !== s || e.pseudoElement || !['transform', 'opacity'].includes(e.propertyName))) return;
+    // The backdrop's fade ends first and reports on the dialog too, and Safari gives it no pseudoElement name,
+    // so wait for the property only the sheet animates: its slide, or its fade under Reduce Motion.
+    if (e && (e.target !== s || e.propertyName !== (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'opacity' : 'transform'))) return;
     s.removeEventListener('transitionend', done);
     clearTimeout(timer);
     if (!s.classList.contains('closing')) return; // reopened or caught by a drag on the way down
@@ -1648,7 +1649,7 @@ const CHANGE = {
     const day = rw(ui.date);
     if (v == null) delete day.weight;
     else if (v >= 30 && v <= 400) day.weight = Math.round(v * 10) / 10;
-    else return toast('Enter the weight in kg, like 124.6');
+    else return toast('Enter the weight in kg, like 82.5');
     save();
     renderWhenIdle();
   },
