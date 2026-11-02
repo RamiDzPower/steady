@@ -1,6 +1,6 @@
 // Cache-first service worker so the app opens with no connection. Bump VERSION on every release.
 // A new version waits until the app asks for it (the Update bar), so it never reloads mid-session.
-const VERSION = 'steady-3';
+const VERSION = 'steady-4';
 const ASSETS = ['./', './index.html', './app.css', './app.js', './logic.js', './plan.js', './icons.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 

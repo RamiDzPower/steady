@@ -1111,15 +1111,74 @@ function sheetUnlock() {
 }
 
 // ---------- Sheet, tooltip, toast ----------
+let sheetReturn = null;
 function showSheet(html) {
   const s = $('#sheet');
+  s.classList.remove('closing');
+  s.style.transform = '';
   s.innerHTML = html;
-  if (!s.open) s.showModal();
+  if (!s.open) {
+    sheetReturn = keyOf(document.activeElement);
+    s.showModal();
+  }
 }
+// The sheet slides back down the way it came, then empties and hands focus back to what opened it.
 function closeSheet() {
   const s = $('#sheet');
-  if (s.open) s.close();
-  s.innerHTML = '';
+  if (!s.open || s.classList.contains('closing')) return;
+  s.classList.add('closing');
+  const done = (e) => {
+    // The backdrop's fade ends first and reports on the dialog too; wait for the sheet's own slide.
+    if (e && (e.target !== s || e.pseudoElement || !['transform', 'opacity'].includes(e.propertyName))) return;
+    s.removeEventListener('transitionend', done);
+    clearTimeout(timer);
+    if (!s.classList.contains('closing')) return; // reopened or caught by a drag on the way down
+    s.classList.remove('closing');
+    s.close();
+    s.innerHTML = '';
+    if (sheetReturn) document.querySelector(sheetReturn)?.focus({ preventScroll: true });
+  };
+  const timer = setTimeout(done, 500);
+  s.addEventListener('transitionend', done);
+}
+// Drag by the grabber or title row: the sheet follows the finger 1:1 from wherever it is on screen, resists
+// being pulled up, and on release goes where the flick's momentum projects it (Apple's deceleration formula).
+const rubberband = (x, size, c = 0.55) => (x * size * c) / (size + c * x);
+const project = (v, rate = 0.998) => (v * rate) / (1 - rate); // v in px per ms
+const outside = (e, r) => e.clientY < r.top || e.clientX < r.left || e.clientX > r.right;
+let backdropDown = false; // a tap on the dimmed page closes the sheet only if it also started there
+function dragSheet(e) {
+  const s = $('#sheet');
+  backdropDown = e.target === s && outside(e, s.getBoundingClientRect());
+  if (!e.isPrimary || e.button > 0 || !e.target.closest('.grabber, .sheet-head') || e.target.closest('button, input, a')) return;
+  const from = new DOMMatrixReadOnly(getComputedStyle(s).transform).m42;
+  const start = e.clientY;
+  const h = s.offsetHeight;
+  const at = (y) => { const d = from + y - start; return d < 0 ? -rubberband(-d, h) : d; };
+  let trail = [[e.timeStamp, e.clientY]];
+  s.setPointerCapture(e.pointerId);
+  s.style.transition = 'none';
+  s.style.transform = `translateY(${from}px)`;
+  s.classList.remove('closing');
+  const move = (m) => {
+    s.style.transform = `translateY(${at(m.clientY)}px)`;
+    trail = [...trail.slice(-4), [m.timeStamp, m.clientY]];
+  };
+  const up = (u) => {
+    s.removeEventListener('pointermove', move);
+    s.removeEventListener('pointerup', up);
+    s.removeEventListener('pointercancel', up);
+    // Velocity over the last 100 ms up to the release, so a finger that stopped before lifting throws nothing.
+    const recent = [...trail, [u.timeStamp, u.clientY]].filter(([t]) => u.timeStamp - t <= 100);
+    const [t0, y0] = recent[0];
+    const [t1, y1] = recent.at(-1);
+    s.style.transition = '';
+    if (u.type === 'pointerup' && at(u.clientY) + project((y1 - y0) / Math.max(1, t1 - t0)) > h / 2) closeSheet();
+    else s.style.transform = '';
+  };
+  s.addEventListener('pointermove', move);
+  s.addEventListener('pointerup', up);
+  s.addEventListener('pointercancel', up);
 }
 function showTip(el, e) {
   const tip = $('#tip');
@@ -1826,7 +1885,12 @@ document.addEventListener('click', (e) => {
   const tipEl = e.target.closest?.('[data-tip]');
   if (tipEl) showTip(tipEl, e);
   else hideTip();
-  if (e.target === $('#sheet')) return closeSheet();
+  const sheet = $('#sheet');
+  if (e.target === sheet) {
+    // A drag of the sheet also ends with a click here, wherever it was let go; only a tap that began on the dimmed page closes.
+    if (backdropDown && outside(e, sheet.getBoundingClientRect())) closeSheet();
+    return;
+  }
   const el = e.target.closest?.('[data-act]');
   if (!el || el.matches('input, select, textarea')) return;
   const fn = ACT[el.dataset.act];
@@ -1851,6 +1915,11 @@ document.addEventListener('input', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches?.('input[data-act="watch"], input[data-act="weight"], input[data-act^="ex-"]')) e.target.blur();
 });
+$('#sheet').addEventListener('pointerdown', dragSheet);
+// Escape slides it down as well. Without a recent tap the browser closes the dialog itself, and the event says so.
+$('#sheet').addEventListener('cancel', (e) => { if (e.cancelable) { e.preventDefault(); closeSheet(); } });
+// iOS Safari only applies :active press styles on pages that listen for touches.
+document.addEventListener('touchstart', () => {}, { passive: true });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (state.profile && L.applyHolds(state, todayISO()).length) save();
