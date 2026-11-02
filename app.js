@@ -1,4 +1,5 @@
 import * as L from './logic.js';
+import { icon } from './icons.js';
 import {
   EFFORT, EXERCISES, SESSIONS, BLOCKS, PROGRESSION, DELOAD, HOT, HOT_LONGWALK, WATCH_ALERT, MEALS, MENU_NOTE, PANTRY, FOOD_SAFETY,
   EATING_OUT, RULES, SAFETY, SLOTS, LABS, WAIST_TARGET, BP_NOTE, BP_CRISIS, REMINDERS, SHORTCUT_IN, SHORTCUT_OUT,
@@ -20,12 +21,10 @@ const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
 const SLOT_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks', extra: 'Extras' };
 const DEFAULT_RPE = { easy: 4, moderate: 5, hard: 7, strength: 7 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const ICON = {
-  prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
-};
-const CLOSE_BTN = `<button class="icon" data-act="sheet-close" aria-label="Close">${ICON.close}</button>`;
+const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'chart-line-up'], ['more', 'More', 'dots-three-circle']];
+const SESSION_ICON = { walks: 'person-simple-walk', longwalk: 'footprints', cardio: 'heartbeat', intervals: 'timer', rest: 'bed' };
+const sessionIcon = (s) => SESSION_ICON[s.id] || (s.kind === 'strength' ? 'barbell' : 'heartbeat');
+const CLOSE_BTN = `<button class="icon-btn" data-act="sheet-close" aria-label="Close">${icon('x')}</button>`;
 
 let state = load();
 const ui = {
@@ -37,6 +36,7 @@ let wakeLock = null;
 let audio = null;
 let swReg = null;
 let undoSnap = null;
+let titleObserver = null;
 
 // ---------- Storage ----------
 function blank() {
@@ -70,6 +70,7 @@ const sessionsOn = (date) => L.sessionsFor(state.profile.startDate, date, reps()
 const posOn = (date) => L.planPosition(state.profile.startDate, date, reps());
 const nextLab = () => state.profile.nextLab || L.addDays(state.profile.startDate, 84);
 const isHot = (date) => (state.settings.hotMonths || []).includes(L.parse(date).getMonth() + 1);
+const hasLog = (d) => { const x = state.days[d]; return !!(x && (x.foods?.length || x.water?.length || x.workouts?.length)); };
 function snapshot() {
   undoSnap = JSON.stringify(state);
 }
@@ -81,6 +82,7 @@ function render(top = false) {
   stopTicker();
   if (!state.profile) ui.screen = 'setup';
   const focusKey = top ? null : keyOf(document.activeElement);
+  const chipX = $('#main .chips')?.scrollLeft ?? 0;
   $('#main').innerHTML = VIEWS[ui.screen]();
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   $('.tabs').hidden = ui.screen === 'setup';
@@ -92,46 +94,74 @@ function render(top = false) {
   } else if (focusKey) {
     document.querySelector(focusKey)?.focus({ preventScroll: true });
   }
+  observeTitle();
+  keepChip(chipX);
+}
+// The section chips scroll sideways: keep the row where it was and bring the selected chip into view.
+function keepChip(x) {
+  const row = $('#main .chips');
+  const on = row?.querySelector('[aria-pressed="true"]');
+  if (!on) return;
+  row.scrollLeft = x;
+  const r = row.getBoundingClientRect();
+  const c = on.getBoundingClientRect();
+  if (c.right > r.right - 16) row.scrollLeft += c.right - r.right + 16;
+  else if (c.left < r.left + 16) row.scrollLeft -= r.left + 16 - c.left;
 }
 function keyOf(el) {
   if (!el || !el.dataset || !el.dataset.act || !$('#main').contains(el)) return null;
   const parts = ['act', 'id', 'slot', 'key', 'ml', 'k', 'i', 'n', 'sec', 'date', 'item'].filter((k) => el.dataset[k] != null);
   return parts.map((k) => `[data-${k}="${CSS.escape(el.dataset[k])}"]`).join('');
 }
+// The large title folds into the blurred bar at the top once it scrolls away, as on iOS.
+function observeTitle() {
+  titleObserver?.disconnect();
+  const bar = $('#navbar');
+  const title = $('#main .nav-title');
+  bar.classList.remove('on');
+  if (!title || !('IntersectionObserver' in window)) return;
+  $('#navbar-title').textContent = title.textContent;
+  titleObserver = new IntersectionObserver(([e]) => bar.classList.toggle('on', !e.isIntersecting), { rootMargin: '-52px 0px 0px 0px' });
+  titleObserver.observe(title);
+}
 
-function gauge(kind, name, value, target, valText, ofText) {
-  const x = 11, top = 6, W = 44, H = 122, full = 1.25;
-  const ratio = target > 0 ? value / target : 0;
-  const fillH = (Math.min(ratio, full) / full) * H;
-  const overH = ratio > 1 ? ((Math.min(ratio, full) - 1) / full) * H : 0;
-  const y = (f) => top + H - (f / full) * H;
-  return `<figure class="gauge">
-    <svg viewBox="0 0 66 136" aria-hidden="true">
-      <defs>
-        <clipPath id="clip-${kind}"><rect x="${x}" y="${top}" width="${W}" height="${H}" rx="11"/></clipPath>
-        <pattern id="hatch-${kind}" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" class="g-${kind}"/><line x1="0" y1="0" x2="0" y2="7" class="g-hatch"/></pattern>
-      </defs>
-      <rect class="g-tube" x="${x}" y="${top}" width="${W}" height="${H}" rx="11"/>
-      <g clip-path="url(#clip-${kind})">
-        <rect class="g-${kind}" x="${x}" y="${(top + H - fillH).toFixed(1)}" width="${W}" height="${fillH.toFixed(1)}"/>
-        ${overH ? `<rect fill="url(#hatch-${kind})" x="${x}" y="${(top + H - fillH).toFixed(1)}" width="${W}" height="${overH.toFixed(1)}"/>` : ''}
-      </g>
-      ${[0.25, 0.5, 0.75].map((f) => `<line class="g-tick" x1="${x}" x2="${x + 9}" y1="${y(f)}" y2="${y(f)}"/>`).join('')}
-      ${target > 0 ? `<line class="g-target" x1="${x - 7}" x2="${x + W + 7}" y1="${y(1)}" y2="${y(1)}"/>` : ''}
-    </svg>
-    <figcaption><span class="name">${name}</span><span class="val">${valText}</span><span class="of">${ofText}</span></figcaption>
+function nav(title, cap = '', actions = '') {
+  return `<header class="nav"><div class="nav-row"><div class="nav-text">${cap ? `<p class="nav-cap">${cap}</p>` : ''}<h1 class="nav-title">${title}</h1></div>${actions ? `<div class="nav-actions">${actions}</div>` : ''}</div></header>`;
+}
+const sectionHead = (title, meta = '') => `<div class="section-head"><h2>${title}</h2>${meta ? `<span class="section-meta">${meta}</span>` : ''}</div>`;
+const callout = (iconName, html, cls = '') => `<div class="callout ${cls}"><span class="tile ${cls || 'info'}">${icon(iconName)}</span><div class="callout-body">${html}</div></div>`;
+const foot = (html) => `<p class="section-foot">${html}</p>`;
+
+function ring(kind, name, value, target, valText, unit, ofText, iconName) {
+  const r = 40, c = 2 * Math.PI * r;
+  const f = target > 0 ? value / target : value > 0 ? 1 : 0;
+  const arc = (frac, cls) => (frac > 0.001 ? `<circle class="${cls}" cx="50" cy="50" r="${r}" stroke-dasharray="${(c * frac).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 50 50)"/>` : '');
+  return `<figure class="ring ${kind}">
+    <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}</svg>${icon(iconName, 'ring-icon')}</div>
+    <figcaption><span class="ring-name">${name}</span><span class="ring-val"><span class="num">${valText}</span><span class="unit"> ${unit}</span></span><span class="ring-of">${ofText}</span></figcaption>
   </figure>`;
 }
 function minibar(value, target, kind, width = 120) {
   const f = target > 0 ? Math.min(value / target, 1) : 0;
-  return `<svg class="minibar" viewBox="0 0 ${width} 8" preserveAspectRatio="none" aria-hidden="true"><rect class="mb-track" width="${width}" height="8" rx="4"/><rect class="mb-${kind}" width="${(width * f).toFixed(1)}" height="8" rx="4"/></svg>`;
+  return `<svg class="minibar" viewBox="0 0 ${width} 6" preserveAspectRatio="none" aria-hidden="true"><rect class="mb-track" width="${width}" height="6" rx="3"/>${f > 0 ? `<rect class="mb-${kind}" width="${Math.max(6, width * f).toFixed(1)}" height="6" rx="3"/>` : ''}</svg>`;
 }
 function meter(label, value, target, kind, unit = '') {
-  return `<div class="meter"><div class="meter-top"><span>${label}</span><span>${fmt(value)}${unit} of ${fmt(target)}${unit}</span></div>${minibar(value, target, kind, 300)}</div>`;
+  return `<div class="meter"><div class="meter-top"><span>${label}</span><span class="meter-val"><span class="num">${fmt(value)}</span>${unit} of ${fmt(target)}${unit}</span></div>${minibar(value, target, kind, 300)}</div>`;
 }
-const note = (html, cls = '') => `<div class="note ${cls}">${html}</div>`;
 
 // ---------- Today ----------
+function weekStrip(d) {
+  const monday = L.mondayOf(d);
+  const today = todayISO();
+  const days = Array.from({ length: 7 }, (_, i) => L.addDays(monday, i));
+  return `<div class="week-strip" role="group" aria-label="Pick a day">
+    <button class="strip-nav" data-act="strip" data-n="-7" aria-label="Previous week">${icon('caret-left')}</button>
+    ${days.map((x) => `<button class="day${x === d ? ' sel' : ''}${x === today ? ' now' : ''}" data-act="day-pick" data-date="${x}" aria-pressed="${x === d}" aria-label="${esc(dateText(x))}">
+      <span class="dow">${esc(dateText(x, { weekday: 'narrow' }))}</span><span class="dn num">${L.parse(x).getDate()}</span><span class="mark${hasLog(x) ? ' on' : ''}"></span></button>`).join('')}
+    <button class="strip-nav" data-act="strip" data-n="7" aria-label="Next week">${icon('caret-right')}</button>
+  </div>`;
+}
+
 function viewToday() {
   const d = ui.date;
   const p = state.profile;
@@ -145,41 +175,44 @@ function viewToday() {
   const exDone = L.effortMinutes(day);
   const exPlan = L.plannedMinutes(sessions);
   const isToday = d === todayISO();
-  const where = pos.before ? `The plan starts ${dateText(p.startDate)}.` : `Week ${pos.week}, ${pos.block.name.toLowerCase()}.`;
   const counts = L.weekCounts(state, L.mondayOf(d));
+  const planMeta = pos.before ? `Starts ${esc(short(p.startDate))}` : `Week ${pos.week}, ${esc(pos.block.name.toLowerCase())}`;
   return `
-  <header class="dayhead">
-    <button class="icon" data-act="day" data-n="-1" aria-label="Previous day">${ICON.prev}</button>
-    <div class="dayhead-text"><h1>${isToday ? 'Today' : esc(dateText(d, { weekday: 'long' }))}</h1>
-      <p class="sub">${esc(dateText(d, { day: 'numeric', month: 'long' }))}. ${esc(where)}</p></div>
-    <button class="icon" data-act="day" data-n="1" aria-label="Next day">${ICON.next}</button>
-  </header>
-  ${isToday ? '' : '<p class="dayhead-text"><button class="link" data-act="day" data-n="0">Back to today</button></p>'}
+  ${nav(isToday ? 'Today' : esc(dateText(d, { weekday: 'long' })), esc(dateText(d, { day: 'numeric', month: 'long', year: 'numeric' })),
+    isToday ? '' : '<button class="btn btn-gray btn-sm" data-act="day" data-n="0">Today</button>')}
+  ${weekStrip(d)}
   ${banners(d, pos, sessions)}
-  <section class="gauges" aria-label="Food, water and exercise so far">
-    ${gauge('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), `of ${fmt(t.kcal)} kcal`)}
-    ${gauge('water', 'Water', water, wTarget, `${litres(water)} L`, `of ${litres(wTarget)} L`)}
-    ${gauge('effort', 'Exercise', exDone, exPlan, `${exDone} min`, exPlan ? `of ${exPlan} planned` : 'rest day')}
+  <section class="card summary" aria-label="Food, water and exercise so far">
+    <div class="rings">
+      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', `of ${fmt(t.kcal)}`, 'fork-knife')}
+      ${ring('water', 'Water', water, wTarget, litres(water), 'L', `of ${litres(wTarget)}`, 'drop')}
+      ${ring('effort', 'Exercise', exDone, exPlan, String(exDone), 'min', exPlan ? `of ${exPlan}` : 'rest day', 'flame')}
+    </div>
+    <div class="mini-bars">
+      <div class="mini"><span class="mini-label">Protein</span><span class="mini-val"><span class="num">${food.p}</span> of ${t.protein} g</span>${minibar(food.p, t.protein, 'fuel')}</div>
+      <div class="mini"><span class="mini-label">Fibre</span><span class="mini-val"><span class="num">${food.fib}</span> of ${t.fibre} g</span>${minibar(food.fib, t.fibre, 'fuel')}</div>
+    </div>
   </section>
-  <div class="bars">
-    <p>Protein <strong>${food.p} g</strong> of ${t.protein} g ${minibar(food.p, t.protein, 'fuel')}</p>
-    <p>Fibre <strong>${food.fib} g</strong> of ${t.fibre} g ${minibar(food.fib, t.fibre, 'effort')}</p>
+  <div class="tiles">
+    <div class="tile-card"><span class="tile-num num">${counts.sugary}</span><span class="tile-label">Sugary drinks this week</span><span class="tile-sub">Aim for none</span></div>
+    <div class="tile-card"><span class="tile-num num">${counts.purine}</span><span class="tile-label">Red meat, offal or shellfish</span><span class="tile-sub">Aim for 2 or fewer</span></div>
   </div>
-  <p class="counts">This week: ${plural(counts.sugary, 'sugary drink', 'sugary drinks')} (aim for none) and ${plural(counts.purine, 'serving', 'servings')} of red meat, offal or shellfish (aim for 2 or fewer).</p>
   ${pos.before ? beforeStart() : ''}
-  <h2>Training</h2>
+  ${sectionHead('Training', planMeta)}
   ${sessionRows(d, sessions, day)}
-  <h2>Water</h2>
-  <div class="water-btns">
-    ${[250, 500, 750].map((ml) => `<button class="btn water" data-act="water" data-ml="${ml}">+${ml} ml</button>`).join('')}
-    <button class="btn" data-act="water-undo" ${day?.water?.length ? '' : 'disabled'}>Undo</button>
+  ${sectionHead('Water', `${litres(water)} of ${litres(wTarget)} L`)}
+  <div class="card water-card">
+    <div class="water-btns">
+      ${[250, 500, 750].map((ml) => `<button class="btn btn-tinted water" data-act="water" data-ml="${ml}">${icon('drop')}+${ml}</button>`).join('')}
+      <button class="icon-btn" data-act="water-undo" aria-label="Undo the last drink" ${day?.water?.length ? '' : 'disabled'}>${icon('arrow-u-up-left')}</button>
+    </div>
   </div>
-  <p class="sub">Today's target is ${fmt(t.waterBase)} ml${wTarget > t.waterBase ? `, plus ${fmt(wTarget - t.waterBase)} ml for ${exDone} minutes of exercise` : ''}. It goes up by 500 ml for every 30 exercise minutes.</p>
-  <h2>Food</h2>
+  ${foot(`The target is ${fmt(t.waterBase)} ml${wTarget > t.waterBase ? `, plus ${fmt(wTarget - t.waterBase)} ml for ${exDone} minutes of exercise` : ''}. It rises 500 ml for every 30 exercise minutes.`)}
+  ${sectionHead('Food', `${fmt(food.kcal)} of ${fmt(t.kcal)} kcal`)}
   ${foodToday(d, day)}
-  <h2>From your Watch</h2>
+  ${sectionHead('From your Watch')}
   ${watchForm(d, day)}
-  <h2>Weight</h2>
+  ${sectionHead('Weight')}
   ${weightForm(d, day)}`;
 }
 
@@ -187,20 +220,20 @@ function banners(d, pos, sessions) {
   const out = [];
   const today = todayISO();
   if (d === today && backupDue()) {
-    out.push(note(`<p>Your log lives only on this phone. ${state.lastBackup ? `Last backup: ${esc(short(state.lastBackup))}.` : 'There is no backup yet.'}</p><button class="btn" data-act="export-open">Back up now</button>`, 'warn'));
+    out.push(callout('cloud-arrow-up', `<p><strong>Back up your log.</strong> It lives only on this phone. ${state.lastBackup ? `Last backup ${esc(short(state.lastBackup))}.` : 'There is no backup yet.'}</p><button class="btn btn-fill btn-sm" data-act="export-open">Back up now</button>`, 'warn'));
   }
   if (!pos.before && pos.repeating) {
-    out.push(note(`<p>This week repeats week ${pos.week}, because last week came in under half the plan. That keeps the step up small.</p><button class="btn" data-act="skip-hold">Move on anyway</button>`));
+    out.push(callout('repeat', `<p><strong>This week repeats week ${pos.week}.</strong> Last week came in under half the plan, so the step up stays small.</p><button class="btn btn-gray btn-sm" data-act="skip-hold">Move on anyway</button>`));
   }
   const ci = L.checkIn(state.profile.startDate, d);
-  if (ci) out.push(note(`<p>${esc(ci.text)}</p>${ci.week !== 27 ? '<button class="btn" data-act="go-health">Add blood test results</button>' : ''}`));
+  if (ci) out.push(callout('calendar-check', `<p>${esc(ci.text)}</p>${ci.week !== 27 ? '<button class="btn btn-gray btn-sm" data-act="go-health">Add blood test results</button>' : ''}`));
   const lab = nextLab();
   const toLab = L.diffDays(today, lab);
   const labDone = (state.labs || []).some((x) => x.date >= L.addDays(lab, -14));
   if (d === today && !labDone && toLab <= 14 && toLab >= -30) {
-    out.push(note(`<p>${toLab >= 0 ? `Blood test due ${esc(short(lab))} (in ${plural(toLab, 'day', 'days')}).` : `Blood test was due ${esc(short(lab))}.`} Ask for fasting glucose, HbA1c, lipids and uric acid.</p>`));
+    out.push(callout('test-tube', `<p><strong>${toLab >= 0 ? `Blood test due ${esc(short(lab))}, in ${plural(toLab, 'day', 'days')}.` : `Blood test was due ${esc(short(lab))}.`}</strong> Ask for fasting glucose, HbA1c, lipids and uric acid.</p>`));
   }
-  if (isHot(d) && sessions.some((s) => s.kind === 'cardio' || s.outdoor)) out.push(note(`<p>${esc(HOT)}</p>`, 'hot'));
+  if (isHot(d) && sessions.some((s) => s.kind === 'cardio' || s.outdoor)) out.push(callout('thermometer-hot', `<p>${esc(HOT)}</p>`, 'hot'));
   return out.join('');
 }
 
@@ -210,85 +243,90 @@ function backupDue() {
 }
 
 function beforeStart() {
-  return note(`<p><strong>Before the first Monday</strong></p><ul>
-    <li>Update your weight in the Health app, so the Watch calorie and cardio fitness numbers are right.</li>
-    <li>Set a Move goal you can close on most days, and raise it when it gets easy.</li>
-    <li>Shop from Food, Shopping (next week), then do the Sunday prep.</li>
-    <li>Add the reminders to your calendar from More.</li>
-    <li>Weigh yourself on Monday morning before breakfast and log it below.</li>
-  </ul>`);
+  return `${sectionHead('Before the first Monday')}<div class="group checklist-plain">${[
+    ['scales', 'Update your weight in the Health app, so the Watch calorie and cardio fitness numbers are right.'],
+    ['flame', 'Set a Move goal you can close on most days, and raise it when it gets easy.'],
+    ['shopping-cart', 'Shop from Food, Shopping (next week), then do the Sunday prep.'],
+    ['calendar-plus', 'Add the reminders to your calendar from More.'],
+    ['scales', 'Weigh yourself on Monday morning before breakfast and log it below.'],
+  ].map(([ic, text]) => `<div class="cell"><span class="tile gray">${icon(ic)}</span><div class="cell-main"><div class="cell-text">${esc(text)}</div></div></div>`).join('')}</div>`;
 }
 
 function sessionRows(d, sessions, day) {
-  if (!sessions.length) return '<p class="sub">Training starts on the plan start date. Week 1 is in the Train tab.</p>';
-  return `<ul class="rows">${sessions.map((s) => {
+  if (!sessions.length) return `<div class="group"><div class="cell"><span class="tile gray">${icon('calendar-check')}</span><div class="cell-main"><div class="cell-text">Training starts on the plan start date. Week 1 is in Train.</div></div></div></div>`;
+  return `<div class="group">${sessions.map((s) => {
     const done = day?.workouts?.filter((w) => w.id === s.id) ?? [];
     const meta = s.kind === 'rest' ? s.how : `${s.minutes} min, ${EFFORT[s.effort].label.toLowerCase()}${s.reps ? `, ${s.reps} repeats` : ''}${s.deload ? ', easier week' : ''}`;
     const logged = done.length ? `. Logged ${done.map((w) => `${w.min} min`).join(' and ')}` : '';
-    const title = s.kind === 'rest' ? `<div class="row-title">${esc(s.name)}</div>`
-      : `<button class="link row-title" data-act="open-session" data-id="${s.id}" data-date="${d}">${esc(s.name)}</button>`;
-    const action = s.kind === 'rest' ? ''
-      : s.id === 'walks' ? `<button class="btn effort" data-act="walk-log" data-date="${d}" aria-label="Log a 10 minute walk">+10 min</button>`
-      : `<button class="btn" data-act="open-session" data-id="${s.id}" data-date="${d}">${done.length ? 'View' : 'Open'}</button>`;
-    return `<li><span class="dot ${done.length ? 'on' : ''}" aria-hidden="true"></span>
-      <div class="row-main">${title}<div class="row-sub">${esc(meta + logged)}</div></div>${action}</li>`;
-  }).join('')}</ul>`;
+    const tile = `<span class="tile ${s.kind === 'rest' ? 'gray' : 'effort'}">${icon(sessionIcon(s))}</span>`;
+    const body = `<div class="cell-main"><div class="cell-title">${esc(s.name)}</div><div class="cell-sub">${esc(meta + logged)}</div></div>`;
+    if (s.kind === 'rest') return `<div class="cell">${tile}${body}</div>`;
+    if (s.id === 'walks') {
+      return `<div class="cell">${tile}<button class="cell-main as-link" data-act="open-session" data-id="${s.id}" data-date="${d}"><span class="cell-title">${esc(s.name)}</span><span class="cell-sub">${esc(meta + logged)}</span></button>
+        <button class="btn btn-tinted effort btn-sm" data-act="walk-log" data-date="${d}" aria-label="Log a 10 minute walk">+10 min</button></div>`;
+    }
+    return `<button class="cell cell-button" data-act="open-session" data-id="${s.id}" data-date="${d}">${tile}${body}
+      <span class="accessory ${done.length ? 'done' : ''}">${done.length ? icon('check-circle') : icon('caret-right')}</span></button>`;
+  }).join('')}</div>`;
 }
 
 function foodToday(d, day) {
   const logged = day?.foods ?? [];
   const planned = L.menuFor(d, state);
-  const t = L.foodTotals(day);
   const yesterday = state.days[L.addDays(d, -1)]?.foods?.length;
   const unlogged = planned.filter(({ slot, meal }) => !logged.some((f) => f.ref === meal.id && f.slot === slot)).length;
-  const blocks = SLOTS.map((slot) => {
+  const groups = SLOTS.map((slot) => {
     const plan = planned.filter((x) => x.slot === slot);
     const extra = logged.map((f, i) => ({ f, i })).filter(({ f }) => f.slot === slot && !plan.some((x) => x.meal.id === f.ref));
     const rows = [
       ...plan.map(({ key, meal, swapped }) => {
         const on = logged.some((f) => f.ref === meal.id && f.slot === slot);
-        return `<li><div class="row-main"><button class="link row-title" data-act="recipe" data-id="${meal.id}">${esc(meal.name)}</button>
-          <div class="row-sub">${meal.kcal} kcal, ${meal.p} g protein${swapped ? ', swapped in' : ''}</div></div>
-          <button class="btn small" data-act="swap-open" data-date="${d}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">Swap</button>
-          <button class="btn fuel" data-act="log-menu" data-slot="${slot}" data-id="${meal.id}" aria-pressed="${on}">${on ? 'Eaten' : 'Log'}</button></li>`;
+        return `<div class="cell"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}"><span class="cell-title">${esc(meal.name)}</span>
+            <span class="cell-sub">${meal.kcal} kcal, ${meal.p} g protein${swapped ? ', swapped in' : ''}</span></button>
+          <button class="icon-btn" data-act="swap-open" data-date="${d}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}</button>
+          <button class="btn btn-tinted fuel btn-sm log${on ? ' on' : ''}" data-act="log-menu" data-slot="${slot}" data-id="${meal.id}" aria-pressed="${on}">${on ? `${icon('check')}Eaten` : 'Log'}</button></div>`;
       }),
-      ...extra.map(({ f, i }) => `<li><div class="row-main"><div class="row-title">${esc(f.name)}</div>
-          <div class="row-sub">${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${f.t ? `, ${esc(f.t)}` : ''}${f.tags?.includes('sugary') ? ', sugary drink' : ''}${f.tags?.includes('purine') ? ', red meat, offal or shellfish' : ''}</div></div>
-          <button class="btn icon" data-act="food-del" data-i="${i}" aria-label="Remove ${esc(f.name)}">${ICON.close}</button></li>`),
+      ...extra.map(({ f, i }) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(f.name)}</div>
+          <div class="cell-sub">${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${f.t ? `, ${esc(f.t)}` : ''}${f.tags?.includes('sugary') ? ', sugary drink' : ''}${f.tags?.includes('purine') ? ', red meat, offal or shellfish' : ''}</div></div>
+          <button class="icon-btn" data-act="food-del" data-i="${i}" aria-label="Remove ${esc(f.name)}">${icon('x')}</button></div>`),
     ];
-    return `<div class="slot-label">${SLOT_LABEL[slot]}</div><ul class="rows">${rows.join('')}</ul>`;
+    return `<p class="group-label">${SLOT_LABEL[slot]}</p><div class="group">${rows.join('')}</div>`;
   }).join('');
-  return `${blocks}
-    <div class="totals"><span>Logged ${fmt(t.kcal)} kcal, ${t.p} g protein, ${t.fib} g fibre</span></div>
-    <div class="actions">
-      <button class="btn primary big" data-act="add-food-open">Add food</button>
-      <button class="btn" data-act="log-day" ${unlogged ? '' : 'disabled'}>Log the rest as planned</button>
-      <button class="btn" data-act="same-yesterday" ${yesterday ? '' : 'disabled'}>Same as yesterday</button>
+  return `${groups}
+    <div class="group actions-group">
+      <button class="cell cell-action" data-act="add-food-open">${icon('plus-circle')}<span>Add food</span></button>
+      <button class="cell cell-action" data-act="log-day" ${unlogged ? '' : 'disabled'}>${icon('check-circle')}<span>Log the rest as planned</span></button>
+      <button class="cell cell-action" data-act="same-yesterday" ${yesterday ? '' : 'disabled'}>${icon('repeat')}<span>Same as yesterday</span></button>
     </div>
-    <p class="sub">Tap a meal name for the recipe. Anything off-plan goes in with Add food, so the numbers stay honest.</p>`;
+    ${foot('Tap a meal for its recipe. Anything off-plan goes in with Add food, so the numbers stay honest.')}`;
 }
 
 function watchForm(d, day) {
   const w = day?.watch ?? {};
   const b = L.burn(state, d);
   const bal = L.balance(state, d);
-  const field = (k, label) => `<label>${label}<input inputmode="numeric" data-act="watch" data-k="${k}" value="${esc(w[k] ?? '')}" placeholder="0" autocomplete="off"></label>`;
-  let text = 'Copy Move calories, exercise minutes and steps from the Fitness app, or paste them with the Steady Watch shortcut.';
+  const field = (k, label, unit, ic, kind) => `<label class="cell field"><span class="tile ${kind}">${icon(ic)}</span><span class="field-label">${label}</span>
+    <input inputmode="numeric" data-act="watch" data-k="${k}" value="${esc(w[k] ?? '')}" placeholder="0" autocomplete="off"><span class="unit">${unit}</span></label>`;
+  let text = 'Copy Move, exercise minutes and steps from the Fitness app, or paste them with the Steady Watch shortcut.';
   if (b) {
     text = `Energy out today is about ${fmt(b.total)} kcal: ${fmt(b.rest)} resting, ${fmt(b.move)} from Move${b.estimated ? ' (your recent average)' : ''}, plus digestion.`;
     if (bal != null) text += ` In minus out so far: ${signed(bal)} kcal.`;
   }
   const src = { import: 'Filled from your Watch export. ', shortcut: 'Pasted from the Steady Watch shortcut. ' }[w.src] || '';
-  return `<div class="grid3">${field('moveKcal', 'Move kcal')}${field('exMin', 'Exercise min')}${field('steps', 'Steps')}</div>
-    <p class="sub">${esc(src + text)}</p>
-    <div class="actions"><button class="btn" data-act="paste-watch">Paste from Watch</button><button class="btn" data-act="copy-health">Copy totals for Health</button>
-    <button class="link" data-act="shortcut-help">Set up the shortcuts</button></div>`;
+  return `<div class="group">${field('moveKcal', 'Move', 'kcal', 'flame', 'fuel')}${field('exMin', 'Exercise', 'min', 'heartbeat', 'effort')}${field('steps', 'Steps', '', 'footprints', 'water')}</div>
+    ${foot(esc(src + text))}
+    <div class="group actions-group">
+      <button class="cell cell-action" data-act="paste-watch">${icon('watch')}<span>Paste from Watch</span></button>
+      <button class="cell cell-action" data-act="copy-health">${icon('heart')}<span>Copy totals for Health</span></button>
+      <button class="cell cell-action" data-act="shortcut-help">${icon('info')}<span>Set up the shortcuts</span></button>
+    </div>`;
 }
 
 function weightForm(d, day) {
   const last = L.weighIns(state).filter(([x]) => x <= d).at(-1);
-  return `<div class="grid2"><label>Weight on ${esc(short(d))} (kg)<input inputmode="decimal" data-act="weight" value="${esc(day?.weight ?? '')}" placeholder="${(last?.[1] ?? state.profile.startWeight).toFixed(1)}" autocomplete="off"></label>
-    <p class="sub">${last ? `Last weigh-in ${esc(short(last[0]))}: ${last[1].toFixed(1)} kg.` : `Start: ${state.profile.startWeight.toFixed(1)} kg.`} Once a week, same morning, before breakfast.</p></div>`;
+  return `<div class="group"><label class="cell field"><span class="tile gray">${icon('scales')}</span><span class="field-label">${esc(short(d))}</span>
+    <input inputmode="decimal" data-act="weight" value="${esc(day?.weight ?? '')}" placeholder="${(last?.[1] ?? state.profile.startWeight).toFixed(1)}" autocomplete="off"><span class="unit">kg</span></label></div>
+    ${foot(`${last ? `Last weigh-in ${esc(short(last[0]))}: ${last[1].toFixed(1)} kg.` : `Start: ${state.profile.startWeight.toFixed(1)} kg.`} Once a week, same morning, before breakfast.`)}`;
 }
 
 // ---------- Train ----------
@@ -305,53 +343,51 @@ function viewTrain() {
   const wk = L.weekSummary(state, monday);
   const z = L.hrZones(p);
   const days = Array.from({ length: 7 }, (_, i) => L.addDays(monday, i));
-  const title = pos.before ? 'Before the plan' : `Week ${pos.week}`;
   const nextMon = L.addDays(L.mondayOf(todayISO()), 7);
   const isCurrent = monday === L.mondayOf(todayISO());
   const nextRepeats = reps().includes(nextMon);
+  const cap = `${esc(short(monday))} to ${esc(short(days[6]))}, ${esc(block.name.toLowerCase())}${pos.held ? `, calendar week ${pos.calWeek}` : ''}`;
+  const actions = `<button class="icon-btn" data-act="week" data-n="-7" aria-label="Previous week">${icon('caret-left')}</button><button class="icon-btn" data-act="week" data-n="7" aria-label="Next week">${icon('caret-right')}</button>`;
+  const zone = (name, range, kind, e) => `<div class="cell"><span class="zone-dot ${kind}"></span><div class="cell-main"><div class="cell-title">${name}</div><div class="cell-sub">RPE ${e.rpe}. ${esc(e.talk)}.</div></div>${range ? `<span class="cell-value num">${range}</span>` : ''}</div>`;
   return `
-  <header class="dayhead">
-    <button class="icon" data-act="week" data-n="-7" aria-label="Previous week">${ICON.prev}</button>
-    <div class="dayhead-text"><h1>${title}</h1><p class="sub">${esc(short(monday))} to ${esc(short(days[6]))}. ${esc(block.name)}${pos.held ? `. Calendar week ${pos.calWeek}` : ''}</p></div>
-    <button class="icon" data-act="week" data-n="7" aria-label="Next week">${ICON.next}</button>
-  </header>
-  <p>${esc(block.intro)}</p>
-  ${pos.deload ? note(`<p>${esc(DELOAD)}</p>`) : ''}
-  ${pos.repeating ? note(`<p>This week repeats week ${pos.week}.</p>${isCurrent ? '<button class="btn" data-act="skip-hold">Move on anyway</button>' : ''}`) : ''}
-  <div class="meters">
+  ${nav(pos.before ? 'Before the plan' : `Week ${pos.week}`, cap, actions)}
+  <p class="lede">${esc(block.intro)}</p>
+  ${pos.deload ? callout('arrow-clockwise', `<p>${esc(DELOAD)}</p>`) : ''}
+  ${pos.repeating ? callout('repeat', `<p><strong>This week repeats week ${pos.week}.</strong></p>${isCurrent ? '<button class="btn btn-gray btn-sm" data-act="skip-hold">Move on anyway</button>' : ''}`) : ''}
+  <div class="card meters">
     ${meter('Exercise minutes', wk.exMin, block.targets.exMin, 'effort')}
     ${meter('Strength sessions', wk.strengthDone, block.targets.strength, 'effort')}
     ${meter('Average steps', wk.stepsAvg ?? 0, block.targets.steps, 'effort')}
   </div>
-  ${isCurrent && !pos.before ? `<div class="actions">${nextRepeats
-    ? '<button class="btn" data-act="repeat-week" data-n="0">Move on next week after all</button>'
-    : '<button class="btn" data-act="repeat-week" data-n="1">Repeat this week next week</button>'}</div>
-    <p class="sub">The plan also holds a week on its own when a week comes in under half: fewer than half the sessions logged and under half the exercise minutes.</p>` : ''}
-  <ul class="rows week">${days.map((date) => {
+  ${isCurrent && !pos.before ? `<div class="group actions-group">${nextRepeats
+    ? `<button class="cell cell-action" data-act="repeat-week" data-n="0">${icon('caret-right')}<span>Move on next week after all</span></button>`
+    : `<button class="cell cell-action" data-act="repeat-week" data-n="1">${icon('repeat')}<span>Repeat this week next week</span></button>`}</div>
+    ${foot('The plan also holds a week on its own when a week comes in under half: fewer than half the sessions logged and under half the exercise minutes.')}` : ''}
+  ${sectionHead('This week')}
+  <div class="group week-list">${days.map((date) => {
     const day = state.days[date];
     const ss = sessionsOn(date);
     const items = ss.length ? ss.map((s) => {
-      if (s.kind === 'rest') return `<div class="linkrow"><span>${esc(s.name)}</span></div>`;
+      if (s.kind === 'rest') return `<div class="line"><span class="line-name">${esc(s.name)}</span></div>`;
       const done = day?.workouts?.some((w) => w.id === s.id);
-      return `<button class="linkrow" data-act="open-session" data-id="${s.id}" data-date="${date}"><span>${esc(s.name)} <span class="sub">${s.minutes} min</span></span>${done ? '<span class="done">Done</span>' : ''}</button>`;
-    }).join('') : '<div class="linkrow sub">Before the plan starts</div>';
-    return `<li><div class="wd ${date === todayISO() ? 'today' : ''}"><span>${esc(dateText(date, { weekday: 'short' }))}</span><span class="num">${L.parse(date).getDate()}</span></div><div class="row-main">${items}</div></li>`;
-  }).join('')}</ul>
-  <h2>How hard</h2>
-  <table class="zones"><thead><tr><th>Effort</th><th>Heart rate</th><th>Feels like</th></tr></thead><tbody>
-    <tr><td>Easy</td><td>under ${z.easy[1]}</td><td>RPE ${EFFORT.easy.rpe}. ${EFFORT.easy.talk}.</td></tr>
-    <tr><td>Moderate</td><td>${z.moderate[0]} to ${z.moderate[1]}</td><td>RPE ${EFFORT.moderate.rpe}. ${EFFORT.moderate.talk}.</td></tr>
-    <tr><td>Hard</td><td>${z.hard[0]} to ${z.hard[1]}</td><td>RPE ${EFFORT.hard.rpe}. ${EFFORT.hard.talk}.</td></tr>
-    <tr><td>Strength</td><td></td><td>RPE ${EFFORT.strength.rpe}. ${EFFORT.strength.talk}.</td></tr>
-  </tbody></table>
-  <p class="sub">Heart rates use a resting rate of ${z.rest} and an estimated maximum of ${z.max}. RPE is how hard it feels from 1 to 10. When heart rate and feel disagree, go by feel.</p>
-  <p class="sub">${esc(WATCH_ALERT)} For most sessions that is ${z.moderate[0]} to ${z.moderate[1]}.</p>
-  <h2>The plan</h2>
-  ${BLOCKS.map((b) => `<h3>${esc(b.name)}, ${b.weeks[1] ? `weeks ${b.weeks[0]} to ${b.weeks[1]}` : `week ${b.weeks[0]} on`}</h3>
-    <p>${esc(b.intro)}</p><p class="sub">Targets: ${b.targets.exMin} exercise minutes and ${b.targets.strength} strength ${b.targets.strength > 1 ? 'sessions' : 'session'} a week, ${fmt(b.targets.steps)} steps a day on average.</p>`).join('')}
-  <p class="sub">${esc(DELOAD)} Check-ins fall on the 3-month, 6-month and 1-year marks.</p>
-  <h2>Stop and check</h2>
-  <ul>${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>`;
+      return `<button class="line as-link" data-act="open-session" data-id="${s.id}" data-date="${date}"><span class="line-name">${esc(s.name)}</span><span class="line-meta">${s.minutes} min</span>${done ? `<span class="accessory done">${icon('check-circle')}</span>` : `<span class="accessory">${icon('caret-right')}</span>`}</button>`;
+    }).join('') : '<div class="line"><span class="line-name dim">Before the plan starts</span></div>';
+    return `<div class="cell day-cell"><div class="date-badge${date === todayISO() ? ' now' : ''}"><span>${esc(dateText(date, { weekday: 'short' }))}</span><span class="num">${L.parse(date).getDate()}</span></div><div class="cell-main">${items}</div></div>`;
+  }).join('')}</div>
+  ${sectionHead('How hard')}
+  <div class="group">
+    ${zone('Easy', `under ${z.easy[1]}`, 'easy', EFFORT.easy)}
+    ${zone('Moderate', `${z.moderate[0]} to ${z.moderate[1]}`, 'moderate', EFFORT.moderate)}
+    ${zone('Hard', `${z.hard[0]} to ${z.hard[1]}`, 'hard', EFFORT.hard)}
+    ${zone('Strength', '', 'strength', EFFORT.strength)}
+  </div>
+  ${foot(`Heart rates in bpm, from a resting rate of ${z.rest} and an estimated maximum of ${z.max}. When heart rate and feel disagree, go by feel. ${esc(WATCH_ALERT)} For most sessions that is ${z.moderate[0]} to ${z.moderate[1]}.`)}
+  ${sectionHead('The plan')}
+  <div class="group">${BLOCKS.map((b, i) => `<div class="cell block-cell${!pos.before && pos.blockIndex === i ? ' current' : ''}"><span class="tile ${!pos.before && pos.blockIndex === i ? 'effort' : 'gray'}"><span class="num">${i + 1}</span></span>
+    <div class="cell-main"><div class="cell-title">${esc(b.name)}</div><div class="cell-sub">${b.weeks[1] ? `Weeks ${b.weeks[0]} to ${b.weeks[1]}` : `Week ${b.weeks[0]} on`}. ${b.targets.exMin} exercise minutes and ${b.targets.strength} strength ${b.targets.strength > 1 ? 'sessions' : 'session'} a week, ${fmt(b.targets.steps)} steps a day.</div><p class="cell-text">${esc(b.intro)}</p></div></div>`).join('')}</div>
+  ${foot(`${esc(DELOAD)} Check-ins fall on the 3-month, 6-month and 1-year marks.`)}
+  ${sectionHead('Stop and check')}
+  <div class="card prose"><ul>${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
 }
 
 // ---------- Session ----------
@@ -385,28 +421,27 @@ function viewSession() {
   const otherActive = state.active && !active;
   const hot = isHot(date) && (s.kind === 'cardio' || s.outdoor);
   return `
-  <div class="sessionhead"><button class="btn" data-act="close-session">${ICON.prev} Back</button></div>
-  <h1>${esc(s.name)}</h1>
-  <p class="sub">${esc(dateText(date))}. About ${s.minutes} minutes${s.reps && s.id === 'intervals' ? `, ${s.reps} repeats` : ''}.</p>
-  <div class="effort-band ${s.effort === 'hard' ? 'hard' : ''}"><strong>${eff.label}</strong>${hr ? `, ${hr}` : ''}. RPE ${eff.rpe}. ${esc(eff.talk)}.</div>
-  ${s.deload ? note(`<p>${esc(DELOAD)}</p>`) : ''}
-  ${hot ? note(`<p>${esc(s.outdoor ? HOT_LONGWALK : HOT)}</p>`, 'hot') : ''}
-  <p>${esc(s.how)}</p>
-  <p class="sub">${esc(s.why)}</p>
-  ${hr && s.kind !== 'strength' ? `<p class="sub">${esc(WATCH_ALERT)}</p>` : ''}
-  ${otherActive ? note(`<p>Another session is running (${esc(SESSIONS[state.active.id]?.name ?? '')}). Starting this one discards it.</p>`) : ''}
+  <div class="back-row"><button class="back" data-act="close-session">${icon('caret-left')}<span>${ui.tab === 'today' ? 'Today' : 'Train'}</span></button></div>
+  ${nav(esc(s.name), `${esc(dateText(date))}, about ${s.minutes} minutes${s.reps && s.id === 'intervals' ? `, ${s.reps} repeats` : ''}`)}
+  <div class="chip-row"><span class="chip ${s.effort}">${eff.label}</span>${hr ? `<span class="chip num">${hr}</span>` : ''}<span class="chip">RPE ${eff.rpe}</span></div>
+  <p class="lede">${esc(eff.talk)}. ${esc(s.how)}</p>
+  ${foot(esc(s.why))}
+  ${s.deload ? callout('arrow-clockwise', `<p>${esc(DELOAD)}</p>`) : ''}
+  ${hot ? callout('thermometer-hot', `<p>${esc(s.outdoor ? HOT_LONGWALK : HOT)}</p>`, 'hot') : ''}
+  ${hr && s.kind !== 'strength' ? callout('watch', `<p>${esc(WATCH_ALERT)}</p>`) : ''}
+  ${otherActive ? callout('warning', `<p>Another session is running (${esc(SESSIONS[state.active.id]?.name ?? '')}). Starting this one discards it.</p>`, 'warn') : ''}
   ${active
-    ? '<div class="timerbar"><div><div class="sub">Elapsed</div><div class="timer" id="elapsed">0:00</div></div><button class="btn effort big" data-act="finish">Finish</button></div>'
-    : `<div class="actions"><button class="btn effort big" data-act="start">Start</button>${s.id === 'walks'
-      ? '<button class="btn" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
-      : `<button class="btn" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}
-  ${s.id === 'intervals' && active ? '<div class="phase" id="phase"></div>' : ''}
-  ${s.id === 'intervals' ? `<p class="sub">Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.</p>` : ''}
+    ? `<div class="card timer-card"><div class="timer-label">Elapsed</div><div class="timer num" id="elapsed">0:00</div><button class="btn-start" data-act="finish">Finish</button></div>`
+    : `<div class="start-row"><button class="btn-start" data-act="start">${icon('play')}Start</button>${s.id === 'walks'
+      ? '<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
+      : `<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}
+  ${s.id === 'intervals' && active ? '<div class="card phase" id="phase"></div>' : ''}
+  ${s.id === 'intervals' ? foot(`Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.`) : ''}
   <div id="rest" class="rest" hidden></div>
-  ${s.exercises ? `<ul class="exlist">${s.exercises.map(([exId, sets, spec, rest], i) => exerciseCard(exId, sets, spec, rest, i, active)).join('')}</ul><p class="sub">${esc(PROGRESSION)}</p>` : ''}
-  ${logged.length ? `<h2>Logged</h2><ul class="rows">${logged.map(({ w, i }) => `<li><div class="row-main"><div class="row-title">${w.min} min, RPE ${w.rpe}${w.hr ? `, ${w.hr} bpm` : ''}</div>
-      <div class="row-sub">${esc(w.t || '')}${w.note ? `. ${esc(w.note)}` : ''}${w.ex?.length ? `. ${esc(w.ex.filter((e) => e.kg || e.reps).map((e) => `${EXERCISES[e.id]?.name}: ${e.kg ? `${e.kg} kg × ` : ''}${e.reps ?? ''}`).join(', '))}` : ''}</div></div>
-      <button class="btn icon" data-act="workout-del" data-i="${i}" aria-label="Remove this log">${ICON.close}</button></li>`).join('')}</ul>` : ''}`;
+  ${s.exercises ? `<div class="exlist">${s.exercises.map(([exId, sets, spec, rest], i) => exerciseCard(exId, sets, spec, rest, i, active)).join('')}</div>${foot(esc(PROGRESSION))}` : ''}
+  ${logged.length ? `${sectionHead('Logged')}<div class="group">${logged.map(({ w, i }) => `<div class="cell"><span class="tile effort">${icon('check')}</span><div class="cell-main"><div class="cell-title">${w.min} min, RPE ${w.rpe}${w.hr ? `, ${w.hr} bpm` : ''}</div>
+      <div class="cell-sub">${esc(w.t || '')}${w.note ? `. ${esc(w.note)}` : ''}${w.ex?.length ? `. ${esc(w.ex.filter((e) => e.kg || e.reps).map((e) => `${EXERCISES[e.id]?.name}: ${e.kg ? `${e.kg} kg × ` : ''}${e.reps ?? ''}`).join(', '))}` : ''}</div></div>
+      <button class="icon-btn" data-act="workout-del" data-i="${i}" aria-label="Remove this log">${icon('x')}</button></div>`).join('')}</div>` : ''}`;
 }
 
 function exerciseCard(exId, sets, spec, rest, i, active) {
@@ -418,15 +453,15 @@ function exerciseCard(exId, sets, spec, rest, i, active) {
   const unitLabel = unit === 's' ? 'Seconds' : unit === 'm' ? 'Metres' : 'Reps';
   const kg = active?.log?.[i]?.kg ?? last?.kg ?? '';
   const rp = active?.log?.[i]?.reps ?? last?.reps ?? L.repSpec(spec).top ?? '';
-  return `<li class="ex"><div class="row-title">${i + 1}. ${esc(ex.name)}</div><div class="row-sub">${sets} sets of ${esc(spec)}, ${rest} s rest</div>
-    <p class="cue">${esc(ex.cue)}</p><p class="sub">${esc(ex.alt)}</p>
-    ${last ? `<p class="sub">Last time, ${esc(short(last.date))}: ${last.kg ? `${last.kg} kg, ` : ''}${last.reps ?? '?'} ${unitLabel.toLowerCase()}, ${last.sets} of ${last.planned} sets. ${esc(hint)}</p>` : ''}
+  return `<section class="card ex"><div class="ex-head"><span class="ex-num num">${i + 1}</span><div><h3 class="ex-name">${esc(ex.name)}</h3><p class="ex-meta">${sets} sets of ${esc(spec)}, ${rest} s rest</p></div></div>
+    <p class="cue">${esc(ex.cue)}</p><p class="ex-alt">${esc(ex.alt)}</p>
+    ${last ? `<p class="ex-last">Last time, ${esc(short(last.date))}: ${last.kg ? `${last.kg} kg, ` : ''}${last.reps ?? '?'} ${unitLabel.toLowerCase()}, ${last.sets} of ${last.planned} sets. ${esc(hint)}</p>` : ''}
     <div class="ex-log">
-      <label>kg<input inputmode="decimal" data-act="ex-kg" data-i="${i}" value="${esc(kg)}" placeholder="body" autocomplete="off"></label>
-      <label>${unitLabel}<input inputmode="numeric" data-act="ex-reps" data-i="${i}" value="${esc(rp)}" autocomplete="off"></label>
+      <label class="pill-field"><span>kg</span><input inputmode="decimal" data-act="ex-kg" data-i="${i}" value="${esc(kg)}" placeholder="body" autocomplete="off"></label>
+      <label class="pill-field"><span>${unitLabel}</span><input inputmode="numeric" data-act="ex-reps" data-i="${i}" value="${esc(rp)}" autocomplete="off"></label>
     </div>
-    <div class="sets">${Array.from({ length: sets }, (_, k) => `<button class="setbtn" data-act="set" data-i="${i}" data-k="${k}" aria-pressed="${k < done}" aria-label="Set ${k + 1}">${k + 1}</button>`).join('')}
-      <button class="btn" data-act="rest" data-sec="${rest}">Rest ${rest} s</button></div></li>`;
+    <div class="sets">${Array.from({ length: sets }, (_, k) => `<button class="setbtn num" data-act="set" data-i="${i}" data-k="${k}" aria-pressed="${k < done}" aria-label="Set ${k + 1}">${k < done ? icon('check') : k + 1}</button>`).join('')}
+      <button class="btn btn-gray btn-sm" data-act="rest" data-sec="${rest}">${icon('timer')}Rest ${rest} s</button></div></section>`;
 }
 
 function intervalPhases(n) {
@@ -455,12 +490,12 @@ function tick() {
       }
       ui.phase = i;
       if (i >= phases.length) {
-        ph.className = 'phase';
+        ph.className = 'card phase';
         ph.innerHTML = '<div class="phase-name">Done. Tap Finish.</div>';
       } else {
-        ph.className = `phase${phases[i].hard ? ' hard' : ''}`;
+        ph.className = `card phase${phases[i].hard ? ' hard' : ''}`;
         const next = phases[i + 1];
-        ph.innerHTML = `<div class="phase-name">${esc(phases[i].name)}</div><div class="timer">${mmss(phases[i].sec - t)}</div>${next ? `<div class="sub">Next: ${esc(next.name)}</div>` : ''}`;
+        ph.innerHTML = `<div class="phase-name">${esc(phases[i].name)}</div><div class="timer num">${mmss(phases[i].sec - t)}</div>${next ? `<div class="phase-next">Next: ${esc(next.name)}</div>` : ''}`;
       }
     }
   }
@@ -470,7 +505,7 @@ function tick() {
     r.hidden = false;
     if (left > 0) {
       r.className = 'rest';
-      r.innerHTML = `<div><div class="sub">Rest</div><div class="timer">${mmss(left)}</div></div><button class="btn" data-act="rest-skip">Skip</button>`;
+      r.innerHTML = `<div><div class="rest-label">Rest</div><div class="rest-time num">${mmss(left)}</div></div><button class="btn btn-gray btn-sm" data-act="rest-skip">Skip</button>`;
     } else {
       if (!ui.rest.beeped) {
         ui.rest.beeped = true;
@@ -478,7 +513,7 @@ function tick() {
         flash('Rest over. Next set.', 'easy');
       }
       r.className = 'rest go';
-      r.innerHTML = '<div><div class="sub">Rest is over</div><div class="timer">Go</div></div><button class="btn" data-act="rest-skip">OK</button>';
+      r.innerHTML = '<div><div class="rest-label">Rest is over</div><div class="rest-time">Go</div></div><button class="btn btn-gray btn-sm" data-act="rest-skip">OK</button>';
       if (left < -8) { ui.rest = null; r.hidden = true; }
     }
   }
@@ -539,78 +574,81 @@ function beep(times) {
 }
 
 // ---------- Food ----------
-const FOOD_SECTIONS = [['menu', 'Menu'], ['prep', 'Meal prep'], ['shopping', 'Shopping'], ['recipes', 'Recipes'], ['out', 'Eating out'], ['rules', 'Rules']];
+const FOOD_SECTIONS = [['menu', 'Menu', 'fork-knife'], ['prep', 'Meal prep', 'cooking-pot'], ['shopping', 'Shopping', 'shopping-cart'], ['recipes', 'Recipes', 'book-open'], ['out', 'Eating out', 'storefront'], ['rules', 'Rules', 'list-checks']];
 const foodMonday = () => L.addDays(L.mondayOf(todayISO()), ui.foodWeek === 'next' ? 7 : 0);
+const segmented = (act, items, current, label) => `<div class="segmented" role="group" aria-label="${label}">${items.map(([k, text]) => `<button data-act="${act}" data-id="${k}" aria-pressed="${current === k}">${text}</button>`).join('')}</div>`;
 
 function viewFood() {
   const body = { menu: foodMenu, recipes: foodRecipes, prep: foodPrep, shopping: foodShopping, out: foodOut, rules: foodRules }[ui.food]();
   const weekly = ['menu', 'prep', 'shopping'].includes(ui.food);
-  return `<h1>Food</h1>
-  <div class="seg" role="group" aria-label="Food sections">${FOOD_SECTIONS.map(([k, label]) => `<button data-act="food-sec" data-id="${k}" aria-pressed="${ui.food === k}">${label}</button>`).join('')}</div>
-  ${weekly ? `<div class="seg" role="group" aria-label="Which week">${[['this', 'This week'], ['next', 'Next week']].map(([k, label]) => `<button data-act="food-week" data-id="${k}" aria-pressed="${ui.foodWeek === k}">${label}</button>`).join('')}</div>` : ''}
+  const monday = foodMonday();
+  const cap = weekly ? `Menu ${L.menuIndex(state.profile.startDate, monday) + 1} of 3, week of ${esc(short(monday))}` : 'Recipes, eating out and the rules';
+  return `${nav('Food', cap)}
+  <div class="chips" role="group" aria-label="Food sections">${FOOD_SECTIONS.map(([k, label, ic]) => `<button class="chip-btn" data-act="food-sec" data-id="${k}" aria-pressed="${ui.food === k}">${icon(ic)}${label}</button>`).join('')}</div>
+  ${weekly ? segmented('food-week', [['this', 'This week'], ['next', 'Next week']], ui.foodWeek, 'Which week') : ''}
   ${body}`;
 }
 
 function recipeBody(m) {
-  return `${m.ing.length ? `<h3>You need</h3><ul>${m.ing.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-    ${m.steps.length ? `<h3>${m.where === 'out' ? 'How to order' : 'How to make it'}</h3><ol>${m.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
-    <p class="sub">About ${m.kcal} kcal, ${m.p} g protein and ${m.fib} g fibre per portion.</p>`;
+  return `<div class="recipe-stats"><span><span class="num">${m.kcal}</span> kcal</span><span><span class="num">${m.p}</span> g protein</span><span><span class="num">${m.fib}</span> g fibre</span></div>
+    ${m.ing.length ? `<h3>You need</h3><ul class="prose-list">${m.ing.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${m.steps.length ? `<h3>${m.where === 'out' ? 'How to order' : 'How to make it'}</h3><ol class="steps">${m.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}`;
 }
 
 function foodMenu() {
   const monday = foodMonday();
   const t = tgt(todayISO());
-  const idx = L.menuIndex(state.profile.startDate, monday);
-  return `<p>Menu ${idx + 1} of 3 for the week of ${esc(short(monday))}. Each day comes to about 2,100 to 2,300 kcal and over 140 g of protein. Your limit is ${fmt(t.kcal)} kcal, so there is room for the odd extra.</p>
-  <p class="sub">${esc(MENU_NOTE)}</p>
+  return `${foot(`Each day comes to about 2,100 to 2,300 kcal and over 140 g of protein. Your limit is ${fmt(t.kcal)} kcal, so there is room for the odd extra. ${esc(MENU_NOTE)}`)}
   ${Array.from({ length: 7 }, (_, i) => {
     const date = L.addDays(monday, i);
     const items = L.menuFor(date, state);
     const tot = L.mealTotals(items.map((x) => x.meal));
-    return `<section class="menu-day"><h3><span>${esc(dateText(date, { weekday: 'long', day: 'numeric', month: 'short' }))}</span><span class="sub">${fmt(tot.kcal)} kcal, ${tot.p} g protein</span></h3>
-      <ul class="rows">${items.map(({ key, slot, meal, swapped }) => `<li><div class="row-main"><button class="link row-title" data-act="recipe" data-id="${meal.id}">${esc(meal.name)}</button><div class="row-sub">${SLOT_LABEL[slot]}, ${meal.kcal} kcal${swapped ? ', swapped in' : ''}</div></div>
-        <button class="btn small" data-act="swap-open" data-date="${date}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">Swap</button></li>`).join('')}</ul></section>`;
+    return `${sectionHead(esc(dateText(date, { weekday: 'long', day: 'numeric', month: 'short' })), `${fmt(tot.kcal)} kcal, ${tot.p} g protein`)}
+      <div class="group">${items.map(({ key, slot, meal, swapped }) => `<div class="cell"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}"><span class="cell-title">${esc(meal.name)}</span><span class="cell-sub">${SLOT_LABEL[slot]}, ${meal.kcal} kcal${swapped ? ', swapped in' : ''}</span></button>
+        <button class="icon-btn" data-act="swap-open" data-date="${date}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}</button></div>`).join('')}</div>`;
   }).join('')}`;
 }
 
 function foodRecipes() {
-  return SLOTS.map((slot) => `<h2>${SLOT_LABEL[slot]}</h2>${MEALS.filter((m) => m.slot === slot).map((m) => `<details><summary><span>${esc(m.name)}</span><span class="sub">${m.kcal} kcal</span></summary><div class="body">${recipeBody(m)}</div></details>`).join('')}`).join('')
-    + `<h2>Extras to log honestly</h2><p class="sub">Typical values for common treats and dishes, so they go in the log in one tap: ${MEALS.filter((m) => m.slot === 'extra').map((m) => `${esc(m.name)} ${m.kcal}`).join(', ')} kcal.</p>`;
+  return SLOTS.map((slot) => `${sectionHead(SLOT_LABEL[slot])}<div class="group">${MEALS.filter((m) => m.slot === slot).map((m) => `<details class="cell-details"><summary class="cell"><div class="cell-main"><span class="cell-title">${esc(m.name)}</span><span class="cell-sub">${m.kcal} kcal, ${m.p} g protein</span></div><span class="accessory">${icon('caret-right')}</span></summary><div class="details-body">${recipeBody(m)}</div></details>`).join('')}</div>`).join('')
+    + `${sectionHead('Extras to log honestly')}${foot(`Typical values, so they go in the log in one tap: ${MEALS.filter((m) => m.slot === 'extra').map((m) => `${esc(m.name)} ${m.kcal}`).join(', ')} kcal.`)}`;
 }
 
 function foodPrep() {
   const monday = foodMonday();
   const sessions = L.prepFor(state, monday);
-  const list = (items) => items.map((x) => `${esc(dateText(x.date, { weekday: 'long' }))}: ${esc(x.name)}`);
-  return `${sessions.map((s) => `<h2>${esc(s.day)} ${esc(short(s.date))}</h2>
-    ${s.steps.length ? `<ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : '<p class="sub">Nothing to batch-cook for these days.</p>'}
-    ${s.covers.length ? `<h3>This covers</h3><ul>${list(s.covers).map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}
-    ${s.freeze.length ? `<h3>Freeze straight away</h3><ul>${list(s.freeze).map((x) => `<li>${x}</li>`).join('')}</ul><p class="sub">Move them to the fridge the night before.</p>` : ''}
-    ${s.fresh.length ? `<h3>Cook on the day</h3><ul>${list(s.fresh).map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}`).join('')}
-  <h2>Keeping it safe</h2><ul>${FOOD_SAFETY.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
-  <p class="sub">No oven? Everything here works in an air fryer, a rice cooker and one large pan. Swaps you make change this plan and the shopping list.</p>`;
+  const list = (items) => items.map((x) => `<li><strong>${esc(dateText(x.date, { weekday: 'long' }))}</strong> ${esc(x.name)}</li>`).join('');
+  return `${sessions.map((s) => `${sectionHead(`${esc(s.day)}`, esc(short(s.date)))}
+    <div class="card prose">${s.steps.length ? `<ol class="steps">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : '<p class="dim">Nothing to batch-cook for these days.</p>'}
+    ${s.covers.length ? `<h3>This covers</h3><ul class="prose-list">${list(s.covers)}</ul>` : ''}
+    ${s.freeze.length ? `<h3>Freeze straight away</h3><ul class="prose-list">${list(s.freeze)}</ul><p class="dim">Move them to the fridge the night before.</p>` : ''}
+    ${s.fresh.length ? `<h3>Cook on the day</h3><ul class="prose-list">${list(s.fresh)}</ul>` : ''}</div>`).join('')}
+  ${sectionHead('Keeping it safe')}<div class="card prose"><ul class="prose-list">${FOOD_SAFETY.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+  ${foot('No oven? Everything here works in an air fryer, a rice cooker and one large pan. Swaps you make change this plan and the shopping list.')}`;
 }
 
 function foodShopping() {
   const monday = foodMonday();
   const ticks = state.shopping[monday] || {};
   const groups = L.shoppingFor(state, monday);
-  const row = (key, name, amount) => `<li><label><input type="checkbox" data-act="shop" data-item="${esc(key)}" ${ticks[key] ? 'checked' : ''}><span>${esc(name)}${amount ? `, <strong>${esc(amount)}</strong>` : ''}</span></label></li>`;
-  return `<p class="sub">Everything for the week of ${esc(short(monday))}, worked out from that week's menu and your swaps. Shop before the Sunday prep.</p>
-  ${groups.map((g) => `<h3>${esc(g.name)}</h3><ul class="checklist rows">${g.items.map((it) => row(it.key, it.name, it.amount)).join('')}</ul>`).join('')}
-  <h3>Check the cupboard</h3><ul class="checklist rows">${PANTRY.map((x, i) => row(`pantry:${i}`, x, '')).join('')}</ul>
-  <div class="actions"><button class="btn" data-act="shop-clear" ${Object.keys(ticks).length ? '' : 'disabled'}>Untick everything</button></div>`;
+  const row = (key, name, amount) => `<label class="cell check-cell"><input type="checkbox" class="round-check" data-act="shop" data-item="${esc(key)}" ${ticks[key] ? 'checked' : ''}><span class="cell-main"><span class="cell-title">${esc(name)}</span></span>${amount ? `<span class="cell-value num">${esc(amount)}</span>` : ''}</label>`;
+  const total = groups.reduce((n, g) => n + g.items.length, 0) + PANTRY.length;
+  const done = Object.keys(ticks).length;
+  return `${foot(`Everything for the week of ${esc(short(monday))}, worked out from that week's menu and your swaps. Shop before the Sunday prep. ${done} of ${total} ticked.`)}
+  ${groups.map((g) => `${sectionHead(esc(g.name))}<div class="group">${g.items.map((it) => row(it.key, it.name, it.amount)).join('')}</div>`).join('')}
+  ${sectionHead('Check the cupboard')}<div class="group">${PANTRY.map((x, i) => row(`pantry:${i}`, x, '')).join('')}</div>
+  <div class="group actions-group"><button class="cell cell-action" data-act="shop-clear" ${done ? '' : 'disabled'}>${icon('arrow-u-up-left')}<span>Untick everything</span></button></div>`;
 }
 
 function foodOut() {
-  return `<h2>Good choices</h2><ul>${EATING_OUT.good.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
-  <h2>Now and then</h2><ul>${EATING_OUT.sometimes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
-  <h2>Useful phrases</h2>
-  <table class="zones phrases"><tbody>${EATING_OUT.phrases.map(([th, ro, en]) => `<tr><td lang="th">${th}</td><td>${esc(ro)}</td><td>${esc(en)}</td></tr>`).join('')}</tbody></table>`;
+  return `${sectionHead('Good choices')}<div class="card prose"><ul class="prose-list">${EATING_OUT.good.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+  ${sectionHead('Now and then')}<div class="card prose"><ul class="prose-list">${EATING_OUT.sometimes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+  ${sectionHead('Useful phrases')}
+  <div class="group">${EATING_OUT.phrases.map(([th, ro, en]) => `<div class="cell"><div class="cell-main"><span class="cell-title thai" lang="th">${th}</span><span class="cell-sub">${esc(ro)}</span></div><span class="cell-value">${esc(en)}</span></div>`).join('')}</div>`;
 }
 
 function foodRules() {
-  return `<ol>${RULES.map((r) => `<li>${esc(r)}</li>`).join('')}</ol>`;
+  return `<div class="card prose"><ol class="steps">${RULES.map((r) => `<li>${esc(r)}</li>`).join('')}</ol></div>`;
 }
 
 function slotNow() {
@@ -635,53 +673,57 @@ function recentFoods() {
   return out.slice(0, 8);
 }
 
+const sheetHead = (title) => `<div class="grabber" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">${title}</h2>${CLOSE_BTN}</div>`;
+
 function sheetAddFood(query = '') {
-  return `<div class="sheet">
-    <div class="sheet-head"><h2 id="sheet-title">Add food</h2>${CLOSE_BTN}</div>
-    <div class="seg" role="group" aria-label="Meal">${SLOTS.map((s) => `<button data-act="add-slot" data-slot="${s}" aria-pressed="${ui.addSlot === s}">${SLOT_LABEL[s]}</button>`).join('')}</div>
-    <div class="seg" role="group" aria-label="Portion">${[0.5, 1, 1.5, 2].map((x) => `<button data-act="portion" data-n="${x}" aria-pressed="${ui.portion === x}">${x === 1 ? '1 portion' : `${x} portions`}</button>`).join('')}</div>
-    <label>Search<input type="search" id="food-q" placeholder="Meals, extras and your own foods" value="${esc(query)}" autocomplete="off"></label>
-    <ul class="rows" id="food-list">${foodListItems(query)}</ul>
-    <h3>Something else</h3>
-    <form class="grid-quick" data-form="quick">
-      <label class="span2">Name<input name="name" required maxlength="80" autocomplete="off"></label>
-      <label>kcal<input name="kcal" inputmode="numeric" required autocomplete="off"></label>
-      <label>Protein (g)<input name="p" inputmode="numeric" autocomplete="off"></label>
-      <label>Values are<select name="per"><option value="portion">for the portion</option><option value="100g">per 100 g</option></select></label>
-      <label>Grams eaten<input name="grams" inputmode="numeric" placeholder="if per 100 g" autocomplete="off"></label>
-      <label class="check span2"><input type="checkbox" name="sugary"> It's a sugary drink</label>
-      <label class="check span2"><input type="checkbox" name="purine"> It's red meat, offal or shellfish</label>
-      <label class="check span2"><input type="checkbox" name="fav" checked> Save to my foods</label>
-      <button class="btn primary span2" type="submit">Add</button>
+  return `<div class="sheet">${sheetHead('Add food')}
+    ${segmented('add-slot-seg', SLOTS.map((s) => [s, SLOT_LABEL[s]]), ui.addSlot, 'Meal')}
+    <div class="chips compact" role="group" aria-label="Portion">${[0.5, 1, 1.5, 2].map((x) => `<button class="chip-btn" data-act="portion" data-n="${x}" aria-pressed="${ui.portion === x}">${x === 1 ? '1 portion' : `${x} portions`}</button>`).join('')}</div>
+    <label class="search">${icon('magnifying-glass')}<input type="search" id="food-q" placeholder="Search meals, extras and your foods" value="${esc(query)}" autocomplete="off" aria-label="Search"></label>
+    <div class="group sheet-list" id="food-list">${foodListItems(query)}</div>
+    ${sectionHead('Something else')}
+    <form data-form="quick">
+      <div class="group">
+        <label class="cell field"><span class="field-label">Name</span><input name="name" required maxlength="80" autocomplete="off" placeholder="Required"></label>
+        <label class="cell field"><span class="field-label">Energy</span><input name="kcal" inputmode="numeric" required autocomplete="off" placeholder="0"><span class="unit">kcal</span></label>
+        <label class="cell field"><span class="field-label">Protein</span><input name="p" inputmode="numeric" autocomplete="off" placeholder="0"><span class="unit">g</span></label>
+        <label class="cell field"><span class="field-label">Values are</span><select name="per"><option value="portion">for the portion</option><option value="100g">per 100 g</option></select></label>
+        <label class="cell field"><span class="field-label">Grams eaten</span><input name="grams" inputmode="numeric" placeholder="if per 100 g" autocomplete="off"><span class="unit">g</span></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Sugary drink</span></span><input type="checkbox" class="switch" name="sugary"></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Red meat, offal or shellfish</span></span><input type="checkbox" class="switch" name="purine"></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Save to my foods</span></span><input type="checkbox" class="switch" name="fav" checked></label>
+      </div>
+      <button class="btn-start" type="submit">Add</button>
     </form>
   </div>`;
 }
 
 function foodListItems(query) {
   const q = query.trim().toLowerCase();
-  const row = (name, sub, act, attrs, extra = '') => `<li><div class="row-main"><div class="row-title">${esc(name)}</div><div class="row-sub">${esc(sub)}</div></div>${extra}<button class="btn" data-act="${act}" ${attrs}>Add</button></li>`;
+  const row = (name, sub, act, attrs, extra = '') => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(name)}</div><div class="cell-sub">${esc(sub)}</div></div>${extra}<button class="btn btn-tinted fuel btn-sm" data-act="${act}" ${attrs}>Add</button></div>`;
+  const head = (t) => `<div class="cell list-head">${t}</div>`;
   const recent = q ? [] : recentFoods();
   const own = state.custom.filter((c) => !q || c.name.toLowerCase().includes(q));
   const lib = MEALS.filter((m) => !q || m.name.toLowerCase().includes(q)).slice(0, 80);
   const parts = [];
-  if (recent.length) parts.push('<li class="list-head">Recent</li>', ...recent.map((f, i) => row(f.name, `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein`, 'add-recent', `data-i="${i}"`)));
+  if (recent.length) parts.push(head('Recent'), ...recent.map((f, i) => row(f.name, `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein`, 'add-recent', `data-i="${i}"`)));
   if (own.length) {
-    parts.push('<li class="list-head">My foods</li>', ...own.map((c) => (c.per === '100g'
+    parts.push(head('My foods'), ...own.map((c) => (c.per === '100g'
       ? row(c.name, `${fmt(c.kcal)} kcal and ${fmt(c.p)} g protein per 100 g`, 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`, `<input class="grams" inputmode="numeric" data-grams="${esc(c.id)}" value="100" aria-label="Grams of ${esc(c.name)}">`)
       : row(c.name, `${fmt(c.kcal)} kcal, ${fmt(c.p)} g protein`, 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`))));
   }
-  if (lib.length) parts.push('<li class="list-head">Meals and extras</li>', ...lib.map((m) => row(m.name, `${m.kcal} kcal, ${m.p} g protein`, 'add-food', `data-kind="meal" data-id="${m.id}"`)));
-  return parts.join('') || '<li class="sub">Nothing matches. Add it under Something else.</li>';
+  if (lib.length) parts.push(head('Meals and extras'), ...lib.map((m) => row(m.name, `${m.kcal} kcal, ${m.p} g protein`, 'add-food', `data-kind="meal" data-id="${m.id}"`)));
+  return parts.join('') || '<div class="cell"><div class="cell-main"><div class="cell-sub">Nothing matches. Add it under Something else.</div></div></div>';
 }
 
 function sheetSwap(date, key, slot) {
   const current = L.menuFor(date, state).find((x) => x.key === key);
   const opts = L.swapOptions(slot);
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Swap ${SLOT_LABEL[slot].toLowerCase()}</h2>${CLOSE_BTN}</div>
-    <p class="sub">${esc(dateText(date))}. Planned: ${esc(L.MEAL_BY_ID[current.planned].name)}.</p>
-    ${current.swapped ? `<div class="actions"><button class="btn" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="">Back to the plan</button></div>` : ''}
-    <ul class="rows">${opts.map((m) => `<li><div class="row-main"><div class="row-title">${esc(m.name)}</div><div class="row-sub">${m.kcal} kcal, ${m.p} g protein, ${m.fib} g fibre</div></div>
-      <button class="btn" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="${m.id}" ${m.id === current.meal.id ? 'disabled' : ''}>Choose</button></li>`).join('')}</ul></div>`;
+  return `<div class="sheet">${sheetHead(`Swap ${SLOT_LABEL[slot].toLowerCase()}`)}
+    ${foot(`${esc(dateText(date))}. Planned: ${esc(L.MEAL_BY_ID[current.planned].name)}.`)}
+    ${current.swapped ? `<div class="group actions-group"><button class="cell cell-action" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="">${icon('arrow-u-up-left')}<span>Back to the plan</span></button></div>` : ''}
+    <div class="group sheet-list">${opts.map((m) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(m.name)}</div><div class="cell-sub">${m.kcal} kcal, ${m.p} g protein, ${m.fib} g fibre</div></div>
+      ${m.id === current.meal.id ? `<span class="accessory done">${icon('check-circle')}</span>` : `<button class="btn btn-gray btn-sm" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="${m.id}">Choose</button>`}</div>`).join('')}</div></div>`;
 }
 
 // ---------- Progress ----------
@@ -707,12 +749,13 @@ function xLabels(dates, xAt) {
 function legend(items) {
   return `<div class="legend">${items.map(([cls, label]) => `<span class="key"><i class="${cls}"></i>${label}</span>`).join('')}</div>`;
 }
-function chartBox(title, legendHtml, svg) {
-  return `<h3>${title}</h3><div class="chart">${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. Tap a day for its numbers.">${svg}</svg></div>`;
+function chartBox(title, big, legendHtml, svg) {
+  return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. Tap a day for its numbers.">${svg}</svg></section>`;
 }
 function hits(n, bw, tip) {
   return Array.from({ length: n }, (_, i) => `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${CH - PT - PB}" data-tip="${esc(tip(i))}"/>`).join('');
 }
+const bigNum = (value, unit, label) => `<span class="num">${value}</span> <span class="big-unit">${unit}</span> <span class="big-label">${label}</span>`;
 
 function energyChart(dates) {
   const rows = dates.map((d) => {
@@ -736,7 +779,9 @@ function energyChart(dates) {
     const r = rows[i];
     return `${dateText(r.d, { weekday: 'short', day: 'numeric', month: 'short' })}\nIn: ${r.intake == null ? 'not logged' : `${fmt(r.intake)} kcal`}\nOut: ${r.out == null ? 'no Watch data' : `${fmt(r.out)} kcal`}\nLimit: ${fmt(r.target)} kcal${r.intake != null && r.out != null ? `\nBalance: ${signed(r.intake - r.out)} kcal` : ''}`;
   };
-  return chartBox('Energy in and out', legend([['sw-fuel', 'Eaten'], ['sw-effort ln', 'Burned (estimate)'], ['dash', 'Your limit']]),
+  const eaten = rows.filter((r) => r.intake != null);
+  const big = eaten.length ? bigNum(fmt(eaten.reduce((a, r) => a + r.intake, 0) / eaten.length), 'kcal', 'average eaten') : '';
+  return chartBox('Energy in and out', big, legend([['sw-fuel', 'Eaten'], ['sw-effort ln', 'Burned (estimate)'], ['dash', 'Your limit']]),
     `${s}${target}${bars}${path ? `<path class="l-effort" d="${path}"/>` : ''}${dots}${xLabels(dates, xAt)}${hits(dates.length, bw, tip)}`);
 }
 
@@ -749,7 +794,9 @@ function waterChart(dates) {
   const bars = rows.map((r, i) => roundedBar(PL + i * bw + 1, y(r.ml), bw - 2, y(0) - y(r.ml), 'm-water')).join('');
   const ticks = rows.map((r, i) => `<line class="t-target" x1="${PL + i * bw + 2}" x2="${PL + (i + 1) * bw - 2}" y1="${y(r.target)}" y2="${y(r.target)}"/>`).join('');
   const tip = (i) => `${dateText(rows[i].d, { weekday: 'short', day: 'numeric', month: 'short' })}\nDrank: ${litres(rows[i].ml)} L\nTarget: ${litres(rows[i].target)} L`;
-  return chartBox('Water against the target', legend([['sw-water', 'Drank'], ['sw-ink ln', 'Target (rises with exercise)']]), `${s}${bars}${ticks}${xLabels(dates, xAt)}${hits(dates.length, bw, tip)}`);
+  const drank = rows.filter((r) => r.ml > 0);
+  const big = drank.length ? bigNum(litres(drank.reduce((a, r) => a + r.ml, 0) / drank.length), 'L', 'average a day') : '';
+  return chartBox('Water', big, legend([['sw-water', 'Drank'], ['sw-ink ln', 'Target (rises with exercise)']]), `${s}${bars}${ticks}${xLabels(dates, xAt)}${hits(dates.length, bw, tip)}`);
 }
 
 function exerciseChart(mondays) {
@@ -766,7 +813,8 @@ function exerciseChart(mondays) {
   const ticks = rows.map((r, i) => (r.target ? `<line class="t-target" x1="${PL + i * bw + 3}" x2="${PL + (i + 1) * bw - 3}" y1="${y(r.target)}" y2="${y(r.target)}"/>` : '')).join('');
   const labels = rows.map((r, i) => `<text class="ax" x="${xAt(i)}" y="${CH - 6}" text-anchor="middle">${esc(short(r.m))}</text>`).filter((_, i) => mondays.length <= 6 || i % 2 === (mondays.length - 1) % 2).join('');
   const tip = (i) => `Week of ${short(rows[i].m)}\nExercise: ${rows[i].ex} min\nTarget: ${rows[i].target ? `${rows[i].target} min` : 'none'}`;
-  return chartBox('Exercise minutes per week', legend([['sw-effort', 'Done'], ['sw-ink ln', 'Weekly target']]), `${s}${bars}${ticks}${labels}${hits(mondays.length, bw, tip)}`);
+  const last = rows.at(-1);
+  return chartBox('Exercise minutes', bigNum(last.ex, 'min', `this week${last.target ? ` of ${last.target}` : ''}`), legend([['sw-effort', 'Done'], ['sw-ink ln', 'Weekly target']]), `${s}${bars}${ticks}${labels}${hits(mondays.length, bw, tip)}`);
 }
 
 function weightChart() {
@@ -807,28 +855,27 @@ function weightChart() {
   const line = (pts, cls) => (pts.length > 1 ? `<path class="${cls}" d="${pts.map(([d, v], i) => `${i ? 'L' : 'M'}${x(d).toFixed(1)},${yv(v).toFixed(1)}`).join('')}"/>` : '');
   const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5" data-tip="${esc(`${short(d)}: ${v.toFixed(1)} kg\nGoal line: ${goalAt(d).toFixed(1)} kg`)}"/>`).join('');
   const last = trend.at(-1);
-  const lbl = last ? `<text class="lbl" x="${Math.min(x(last[0]) + 8, CW - PR - 40)}" y="${yv(last[1]) - 8}">${last[1].toFixed(1)}</text>` : '';
   const keys = [['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend (14-day average)'], ['dash', 'Goal line'], ...(predOk ? [['sw-pred ln', `Expected from ${pred.weeks} fully logged ${pred.weeks === 1 ? 'week' : 'weeks'}`]] : [])];
-  return chartBox('Weight', legend(keys), `${s}${line(goalPts, 'l-target')}${predOk ? line(pred.points, 'l-pred') : ''}${line(trend, 'l-weight')}${dots}${lbl}`);
+  const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, goal ${goalAt(today).toFixed(1)} today`) : '';
+  return chartBox('Weight', big, legend(keys), `${s}${line(goalPts, 'l-target')}${predOk ? line(pred.points, 'l-pred') : ''}${line(trend, 'l-weight')}${dots}`);
 }
 
 function maintenanceCard() {
   const p = state.profile;
   const m = L.maintenance(state, todayISO());
   if (!m.ready) {
-    return note(`<p><strong>Your real burn</strong></p><p class="sub">It shows up after 20 days of food logs and 3 weigh-ins over at least 2 weeks, counting from ${esc(short(m.from))}. So far: ${plural(m.daysLogged, 'day', 'days')} logged and ${plural(m.weighIns, 'weigh-in', 'weigh-ins')}.</p>`);
+    return callout('flame', `<p><strong>Your real burn</strong> shows up after 20 days of food logs and 3 weigh-ins over at least 2 weeks, counting from ${esc(short(m.from))}. So far: ${plural(m.daysLogged, 'day', 'days')} logged and ${plural(m.weighIns, 'weigh-in', 'weigh-ins')}.</p>`);
   }
   const using = p.kcalTarget === m.suggested;
-  return note(`<p><strong>Your real burn</strong></p>
-    <p>Over the last ${plural(m.daysLogged, 'logged day', 'logged days')} you ate about ${fmt(m.intake)} kcal a day and your weight trend moved ${m.kgPerWeek >= 0 ? '+' : '−'}${Math.abs(m.kgPerWeek).toFixed(2)} kg a week. So you burn about <strong>${fmt(m.maintenance)} kcal</strong> a day${m.formula ? `, against ${fmt(m.formula)} from the formula and the Watch` : ''}.</p>
-    <p>To keep losing about 0.5 kg a week, the limit would be ${fmt(m.suggested)} kcal.</p>
-    <div class="actions">${using ? '<span class="done">Using it</span>' : `<button class="btn" data-act="use-limit" data-n="${m.suggested}">Use ${fmt(m.suggested)} kcal</button>`}
-    ${p.kcalTarget ? '<button class="btn" data-act="use-limit" data-n="0">Back to the automatic limit</button>' : ''}</div>`);
+  return `<section class="card burn-card"><div class="chart-head"><h3>Your real burn</h3><p class="chart-big">${bigNum(fmt(m.maintenance), 'kcal', 'a day')}</p></div>
+    <p>Over the last ${plural(m.daysLogged, 'logged day', 'logged days')} you ate about ${fmt(m.intake)} kcal a day and your weight trend moved ${m.kgPerWeek >= 0 ? '+' : '−'}${Math.abs(m.kgPerWeek).toFixed(2)} kg a week${m.formula ? `. The formula and the Watch said ${fmt(m.formula)}` : ''}. To keep losing about 0.5 kg a week, the limit would be ${fmt(m.suggested)} kcal.</p>
+    <div class="btn-row">${using ? `<span class="accessory done">${icon('check-circle')} Using it</span>` : `<button class="btn btn-fill btn-sm" data-act="use-limit" data-n="${m.suggested}">Use ${fmt(m.suggested)} kcal</button>`}
+    ${p.kcalTarget ? '<button class="btn btn-gray btn-sm" data-act="use-limit" data-n="0">Back to automatic</button>' : ''}</div></section>`;
 }
 
 function viewProgress() {
-  return `<h1>Progress</h1>
-  <div class="seg" role="group" aria-label="Progress views">${[['charts', 'Charts'], ['health', 'Health checks']].map(([k, label]) => `<button data-act="progress-view" data-id="${k}" aria-pressed="${ui.progress === k}">${label}</button>`).join('')}</div>
+  return `${nav('Progress', ui.progress === 'health' ? 'Blood tests, blood pressure and waist' : 'Food, water, training and weight')}
+  ${segmented('progress-view', [['charts', 'Charts'], ['health', 'Health checks']], ui.progress, 'Progress views')}
   ${ui.progress === 'health' ? viewHealth() : viewCharts()}`;
 }
 
@@ -844,37 +891,37 @@ function viewCharts() {
   const kgWeek = wk.balance.length >= 3 ? (-wk.balanceAvg * 7) / L.KCAL_PER_KG : null;
   const counts = L.weekCounts(state, monday);
   const any = Object.values(state.days).some((d) => d.foods?.length || d.water?.length || d.workouts?.length || d.watch || d.weight);
-  const stat = (label, value) => `<div><dt>${label}</dt><dd>${value}</dd></div>`;
-  return `<h2>This week</h2>
-  <dl class="stats">
+  const stat = (label, value) => `<div class="cell"><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value">${value}</span></div>`;
+  return `${sectionHead('This week')}
+  <div class="group">
     ${stat('Sessions done', `${wk.done} of ${wk.planned}`)}
     ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`)}
-    ${stat('Training load (RPE x minutes)', fmt(wk.load))}
+    ${stat('Training load', `${fmt(wk.load)} (RPE × min)`)}
     ${stat('Average steps', wk.stepsAvg != null ? fmt(wk.stepsAvg) : 'no data')}
     ${stat('Food logged', `${wk.daysLogged} of 7 days`)}
     ${stat('Average eaten', wk.kcalAvg != null ? `${fmt(wk.kcalAvg)} of ${fmt(tg.kcal)} kcal` : 'no data')}
     ${stat('Average protein', wk.proteinAvg != null ? `${wk.proteinAvg} of ${tg.protein} g` : 'no data')}
     ${stat('Average water', wk.waterAvg != null ? `${litres(wk.waterAvg)} of ${litres(wk.waterTargetAvg)} L` : 'no data')}
-    ${stat('Sugary drinks', `${counts.sugary} (aim for none)`)}
-    ${stat('Red meat, offal or shellfish', `${counts.purine} (aim for 2 or fewer)`)}
+    ${stat('Sugary drinks', `${counts.sugary}, aim for none`)}
+    ${stat('Red meat, offal or shellfish', `${counts.purine}, aim for 2 or fewer`)}
     ${stat('In minus out, per day', wk.balanceAvg != null ? `${signed(wk.balanceAvg)} kcal` : 'no data')}
     ${kgWeek != null ? stat('At that rate', `about ${Math.abs(kgWeek).toFixed(1)} kg a week ${kgWeek > 0 ? 'down' : 'up'}`) : ''}
-  </dl>
+  </div>
   ${maintenanceCard()}
-  ${any ? '' : note('<p>Log a few days of food, water and Watch numbers and these charts fill in.</p>')}
-  <div class="seg" role="group" aria-label="Days shown">${[14, 28].map((n) => `<button data-act="range" data-n="${n}" aria-pressed="${ui.range === n}">${n} days</button>`).join('')}</div>
+  ${any ? '' : callout('chart-line-up', '<p>Log a few days of food, water and Watch numbers and these charts fill in.</p>')}
+  ${segmented('range', [['14', '14 days'], ['28', '28 days']], String(ui.range), 'Days shown')}
   ${energyChart(dates)}
   ${waterChart(dates)}
   ${exerciseChart(mondays)}
   ${weightChart()}
-  <h2>Week by week</h2>
-  <div class="scroll-x"><table class="tbl"><thead><tr><th>Week of</th><th>Sessions</th><th>Ex min</th><th>Load</th><th>Steps</th><th>kcal</th><th>Protein</th><th>Water L</th><th>In minus out</th><th>Weight</th></tr></thead><tbody>
+  ${sectionHead('Week by week')}
+  <div class="card table-card"><div class="scroll-x"><table class="tbl"><thead><tr><th>Week of</th><th>Sessions</th><th>Ex min</th><th>Load</th><th>Steps</th><th>kcal</th><th>Protein</th><th>Water L</th><th>In minus out</th><th>Weight</th></tr></thead><tbody>
   ${mondays.slice().reverse().map((m) => {
     const w = L.weekSummary(state, m);
     const wt = w.weights.at(-1)?.[1];
     return `<tr><td>${esc(short(m))}</td><td>${w.done}/${w.planned}</td><td>${w.exMin}</td><td>${fmt(w.load)}</td><td>${w.stepsAvg != null ? fmt(w.stepsAvg) : ''}</td><td>${w.kcalAvg != null ? fmt(w.kcalAvg) : ''}</td><td>${w.proteinAvg ?? ''}</td><td>${w.waterAvg != null ? litres(w.waterAvg) : ''}</td><td>${w.balanceAvg != null ? signed(w.balanceAvg) : ''}</td><td>${wt ? wt.toFixed(1) : ''}</td></tr>`;
-  }).join('')}</tbody></table></div>
-  <p class="sub">Burned is resting energy from your weight, height and age, plus the Watch Move calories, plus about 10% of what you eat for digestion. Both sides are estimates, so watch the trend over weeks. Early on the scale often drops faster than this predicts, because of water.</p>`;
+  }).join('')}</tbody></table></div></div>
+  ${foot('Burned is resting energy from your weight, height and age, plus the Watch Move calories, plus about 10% of what you eat for digestion. Both sides are estimates, so watch the trend over weeks. Early on the scale often drops faster than this predicts, because of water.')}`;
 }
 
 function viewHealth() {
@@ -885,52 +932,56 @@ function viewHealth() {
   const sum = L.bpSummary(state.bp, today);
   const lab = nextLab();
   const toLab = L.diffDays(today, lab);
-  const cell = (l, key) => {
-    const v = l[key];
-    if (v == null) return '<td></td>';
-    return `<td>${v}<span class="status">${esc(L.labStatus(key, v))}</span></td>`;
+  const dated = (d) => dateText(d, { day: 'numeric', month: 'short', year: 'numeric' });
+  // One row per test, as the Health app does: the newest value with its status, the one before it underneath.
+  const labRow = (x) => {
+    const [now, was] = labs.filter((l) => l[x.key] != null);
+    const when = now && now.date !== labs[0].date ? `, ${esc(dated(now.date))}` : '';
+    return `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(x.name)}</div><div class="cell-sub">Target ${esc(x.target.split(' (')[0])}.${was ? ` Was ${was[x.key]} on ${esc(dated(was.date))}.` : ''}</div></div>
+      <span class="cell-value">${now ? `<span class="lab-v num">${now[x.key]} <small>${esc(x.unit)}</small></span>${esc(L.labStatus(x.key, now[x.key]))}${when}` : 'no result yet'}</span></div>`;
   };
   const levelText = { normal: 'Normal.', elevated: 'Slightly above 120. Keep an eye on it.', raised: 'At or above 130/80 on average. Show this to your GP.', high: 'At or above 140/90 on average. See your GP soon.' };
   const firstW = waist[0], lastW = waist.at(-1);
-  return `<h2>Blood tests</h2>
-  <p>Next blood test: <strong>${esc(dateText(lab))}</strong>${toLab >= 0 ? `, in ${plural(toLab, 'day', 'days')}` : ''}. Ask for fasting glucose, HbA1c, lipids and uric acid.</p>
-  <label class="inline">Change the date<input type="date" data-act="next-lab" value="${lab}"></label>
-  <div class="scroll-x"><table class="tbl labs"><thead><tr><th>Date</th>${LABS.map((l) => `<th>${esc(l.name)}<span class="status">${esc(l.unit)}</span></th>`).join('')}<th></th></tr></thead><tbody>
-    <tr class="targets"><td>Target</td>${LABS.map((l) => `<td>${esc(l.target.split(' (')[0])}</td>`).join('')}<td></td></tr>
-    ${labs.map((l) => `<tr><td>${esc(short(l.date))} ${L.parse(l.date).getFullYear()}</td>${LABS.map((x) => cell(l, x.key)).join('')}<td><button class="btn icon" data-act="health-del" data-k="labs" data-date="${l.date}" aria-label="Remove the results from ${esc(short(l.date))}">${ICON.close}</button></td></tr>`).join('')}
-  </tbody></table></div>
-  ${labs.length ? '' : '<p class="sub">No results yet. Add your last checkup, or import the checkup file from the Mac in More.</p>'}
-  <div class="actions"><button class="btn primary" data-act="lab-open">Add results</button></div>
-  <h2>Blood pressure at home</h2>
-  ${sum ? `<p>Last 7 days: <strong>${sum.sys}/${sum.dia}</strong> on average from ${plural(sum.n, 'reading', 'readings')}. ${esc(levelText[sum.level])}</p>` : `<p class="sub">${esc(BP_NOTE)}</p>`}
-  ${sum?.crisis ? note(`<p>${esc(BP_CRISIS)}</p>`, 'warn') : ''}
-  <form class="bp-form" data-form="bp">
-    <label>Top<input name="sys" inputmode="numeric" required placeholder="120" autocomplete="off"></label>
-    <label>Bottom<input name="dia" inputmode="numeric" required placeholder="80" autocomplete="off"></label>
-    <label>Pulse<input name="pulse" inputmode="numeric" placeholder="70" autocomplete="off"></label>
-    <button class="btn primary" type="submit">Add</button>
-  </form>
-  ${bp.length ? `<ul class="rows">${bp.slice(0, 14).map((r) => `<li><div class="row-main"><div class="row-title">${r.sys}/${r.dia}${r.pulse ? `, pulse ${r.pulse}` : ''}</div><div class="row-sub">${esc(short(r.date))}${r.t ? ` ${esc(r.t)}` : ''}${r.clinic ? ', at the clinic' : ''}</div></div>
-    <button class="btn icon" data-act="health-del" data-k="bp" data-date="${r.date}" data-item="${esc(`${r.t}|${r.sys}|${r.dia}`)}" aria-label="Remove this reading">${ICON.close}</button></li>`).join('')}</ul>` : ''}
-  <h2>Waist</h2>
-  ${lastW ? `<p>Latest: <strong>${lastW.cm} cm</strong> on ${esc(short(lastW.date))}${firstW !== lastW ? `, ${signed(lastW.cm - firstW.cm)} cm since ${esc(short(firstW.date))}` : ''}.</p>` : '<p class="sub">Measure once a month at the navel, breathing out normally.</p>'}
-  <p class="sub">${esc(WAIST_TARGET)}</p>
-  <form class="bp-form" data-form="waist">
-    <label>Waist (cm)<input name="cm" inputmode="decimal" required autocomplete="off"></label>
-    <button class="btn primary" type="submit">Add</button>
-  </form>
-  ${waist.length ? `<ul class="rows">${waist.slice().reverse().map((w) => `<li><div class="row-main"><div class="row-title">${w.cm} cm</div><div class="row-sub">${esc(short(w.date))}</div></div>
-    <button class="btn icon" data-act="health-del" data-k="waist" data-date="${w.date}" aria-label="Remove this measurement">${ICON.close}</button></li>`).join('')}</ul>` : ''}`;
+  return `${sectionHead('Blood tests')}
+  <div class="group">
+    <div class="cell"><span class="tile info">${icon('test-tube')}</span><div class="cell-main"><div class="cell-title">Next blood test</div><div class="cell-sub">${esc(dateText(lab))}${toLab >= 0 ? `, in ${plural(toLab, 'day', 'days')}` : ''}. Ask for fasting glucose, HbA1c, lipids and uric acid.</div></div></div>
+    <label class="cell field"><span class="field-label">Change the date</span><input type="date" data-act="next-lab" value="${lab}"></label>
+  </div>
+  <div class="group">${LABS.map(labRow).join('')}</div>
+  ${labs.length ? '' : foot('No results yet. Add your last checkup, or import the checkup file from the Mac in More.')}
+  ${labs.length ? '<p class="group-label">Results by date</p>' : ''}
+  <div class="group">${labs.map((l) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(dated(l.date))}</div><div class="cell-sub">${plural(LABS.filter((x) => l[x.key] != null).length, 'result', 'results')}</div></div>
+    <button class="icon-btn" data-act="health-del" data-k="labs" data-date="${l.date}" aria-label="Remove the results from ${esc(dated(l.date))}">${icon('x')}</button></div>`).join('')}
+    <button class="cell cell-action" data-act="lab-open">${icon('plus-circle')}<span>Add results</span></button></div>
+  ${sectionHead('Blood pressure at home', sum ? `${plural(sum.n, 'reading', 'readings')} this week` : '')}
+  ${sum ? `<section class="card bp-card"><p class="chart-big">${bigNum(`${sum.sys}/${sum.dia}`, '', '7-day average')}</p><p>${esc(levelText[sum.level])}</p></section>` : foot(esc(BP_NOTE))}
+  ${sum?.crisis ? callout('warning', `<p>${esc(BP_CRISIS)}</p>`, 'warn') : ''}
+  <form data-form="bp"><div class="group">
+    <label class="cell field"><span class="tile fuel">${icon('heart')}</span><span class="field-label">Top</span><input name="sys" inputmode="numeric" required placeholder="120" autocomplete="off"><span class="unit">mmHg</span></label>
+    <label class="cell field"><span class="tile fuel">${icon('heart')}</span><span class="field-label">Bottom</span><input name="dia" inputmode="numeric" required placeholder="80" autocomplete="off"><span class="unit">mmHg</span></label>
+    <label class="cell field"><span class="tile gray">${icon('heartbeat')}</span><span class="field-label">Pulse</span><input name="pulse" inputmode="numeric" placeholder="70" autocomplete="off"><span class="unit">bpm</span></label>
+    <button class="cell cell-action" type="submit">${icon('plus-circle')}<span>Add reading</span></button>
+  </div></form>
+  ${bp.length ? `<div class="group">${bp.slice(0, 14).map((r) => `<div class="cell"><div class="cell-main"><div class="cell-title num">${r.sys}/${r.dia}${r.pulse ? `<span class="dim">, pulse ${r.pulse}</span>` : ''}</div><div class="cell-sub">${esc(short(r.date))}${r.t ? ` ${esc(r.t)}` : ''}${r.clinic ? ', at the clinic' : ''}</div></div>
+    <button class="icon-btn" data-act="health-del" data-k="bp" data-date="${r.date}" data-item="${esc(`${r.t}|${r.sys}|${r.dia}`)}" aria-label="Remove this reading">${icon('x')}</button></div>`).join('')}</div>` : ''}
+  ${sectionHead('Waist')}
+  ${lastW ? `<section class="card bp-card"><p class="chart-big">${bigNum(lastW.cm, 'cm', `on ${esc(short(lastW.date))}`)}</p>${firstW !== lastW ? `<p>${signed(lastW.cm - firstW.cm)} cm since ${esc(short(firstW.date))}.</p>` : ''}</section>` : ''}
+  <form data-form="waist"><div class="group">
+    <label class="cell field"><span class="tile gray">${icon('ruler')}</span><span class="field-label">Waist today</span><input name="cm" inputmode="decimal" required autocomplete="off" placeholder="0"><span class="unit">cm</span></label>
+    <button class="cell cell-action" type="submit">${icon('plus-circle')}<span>Save</span></button>
+  </div></form>
+  ${foot(`${esc(WAIST_TARGET)} Measure once a month at the navel, breathing out normally.`)}
+  ${waist.length ? `<div class="group">${waist.slice().reverse().map((w) => `<div class="cell"><div class="cell-main"><div class="cell-title num">${w.cm} cm</div><div class="cell-sub">${esc(short(w.date))}</div></div>
+    <button class="icon-btn" data-act="health-del" data-k="waist" data-date="${w.date}" aria-label="Remove this measurement">${icon('x')}</button></div>`).join('')}</div>` : ''}`;
 }
 
 function sheetLab() {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Add blood test results</h2>${CLOSE_BTN}</div>
-    <form class="form" data-form="lab">
-      <label>Date<input type="date" name="date" value="${todayISO()}" required></label>
-      <div class="grid2">${LABS.map((l) => `<label>${esc(l.name)} (${esc(l.unit)})<input name="${l.key}" inputmode="decimal" autocomplete="off"></label>`).join('')}</div>
-      <label>Note<input name="note" maxlength="120" autocomplete="off"></label>
-      <button class="btn primary big" type="submit">Save results</button>
-    </form></div>`;
+  return `<div class="sheet">${sheetHead('Blood test results')}
+    <form data-form="lab"><div class="group">
+      <label class="cell field"><span class="field-label">Date</span><input type="date" name="date" value="${todayISO()}" required></label>
+      ${LABS.map((l) => `<label class="cell field"><span class="field-label">${esc(l.name)}</span><input name="${l.key}" inputmode="decimal" autocomplete="off" placeholder="0"><span class="unit">${esc(l.unit)}</span></label>`).join('')}
+      <label class="cell field"><span class="field-label">Note</span><input name="note" maxlength="120" autocomplete="off" placeholder="Optional"></label>
+    </div><button class="btn-start" type="submit">Save results</button></form></div>`;
 }
 
 // ---------- More, setup ----------
@@ -938,115 +989,125 @@ function profileForm(p) {
   const d = p || { sex: 'm', startDate: L.nextMonday(todayISO()), waterBase: 2500 };
   const v = (k) => (d[k] == null ? '' : esc(d[k]));
   const auto = p ? `Automatic now: ${fmt(L.autoKcal(p, L.weightOn(state, todayISO())))} kcal and ${L.autoProtein(p, L.weightOn(state, todayISO()))} g protein. Leave blank to follow your weight.` : 'Leave blank to have them worked out from your weight.';
-  return `<form class="form" data-form="profile">
-    <div class="grid2">
-      <label>Sex<select name="sex"><option value="m" ${d.sex !== 'f' ? 'selected' : ''}>Male</option><option value="f" ${d.sex === 'f' ? 'selected' : ''}>Female</option></select></label>
-      <label>Age<input name="age" inputmode="numeric" required value="${v('age')}" autocomplete="off"></label>
-      <label>Height (cm)<input name="heightCm" inputmode="decimal" required value="${v('heightCm')}" autocomplete="off"></label>
-      <label>Weight now (kg)<input name="startWeight" inputmode="decimal" required value="${v('startWeight')}" autocomplete="off"></label>
-      <label>Resting heart rate<input name="rhr" inputmode="numeric" value="${v('rhr')}" placeholder="From Health" autocomplete="off"></label>
-      <label>Plan starts (Monday)<input name="startDate" type="date" required value="${v('startDate')}"></label>
+  const row = (label, name, unit, attrs) => `<label class="cell field"><span class="field-label">${label}</span><input name="${name}" ${attrs} value="${v(name)}" autocomplete="off">${unit ? `<span class="unit">${unit}</span>` : ''}</label>`;
+  return `<form data-form="profile">
+    <div class="group">
+      <label class="cell field"><span class="field-label">Sex</span><select name="sex"><option value="m" ${d.sex !== 'f' ? 'selected' : ''}>Male</option><option value="f" ${d.sex === 'f' ? 'selected' : ''}>Female</option></select></label>
+      ${row('Age', 'age', 'years', 'inputmode="numeric" required placeholder="Required"')}
+      ${row('Height', 'heightCm', 'cm', 'inputmode="decimal" required placeholder="Required"')}
+      ${row('Weight now', 'startWeight', 'kg', 'inputmode="decimal" required placeholder="Required"')}
+      ${row('Resting heart rate', 'rhr', 'bpm', 'inputmode="numeric" placeholder="From Health"')}
+      <label class="cell field"><span class="field-label">Plan starts</span><input name="startDate" type="date" required value="${v('startDate')}"></label>
     </div>
-    <details class="plain"><summary>Set your own targets</summary>
-      <p class="sub">${esc(auto)}</p>
-      <div class="grid2">
-        <label>Calories a day<input name="kcalTarget" inputmode="numeric" value="${v('kcalTarget')}" placeholder="Automatic" autocomplete="off"></label>
-        <label>Protein a day (g)<input name="proteinTarget" inputmode="numeric" value="${v('proteinTarget')}" placeholder="Automatic" autocomplete="off"></label>
-        <label>Water base (ml)<input name="waterBase" inputmode="numeric" value="${v('waterBase')}" placeholder="2500" autocomplete="off"></label>
-        <label>Max heart rate<input name="maxHr" inputmode="numeric" value="${v('maxHr')}" placeholder="Automatic" autocomplete="off"></label>
+    ${foot('The plan always starts on a Monday. Resting heart rate is in the Health app under Heart.')}
+    <details class="plain"><summary>${icon('caret-right')}Set your own targets</summary>
+      ${foot(esc(auto))}
+      <div class="group">
+        ${row('Calories a day', 'kcalTarget', 'kcal', 'inputmode="numeric" placeholder="Automatic"')}
+        ${row('Protein a day', 'proteinTarget', 'g', 'inputmode="numeric" placeholder="Automatic"')}
+        ${row('Water base', 'waterBase', 'ml', 'inputmode="numeric" placeholder="2500"')}
+        ${row('Max heart rate', 'maxHr', 'bpm', 'inputmode="numeric" placeholder="Automatic"')}
       </div>
     </details>
-    <button class="btn primary big" type="submit">${p ? 'Save' : 'Start the plan'}</button>
+    <button class="btn-start" type="submit">${p ? 'Save' : 'Start the plan'}</button>
   </form>`;
 }
 
 function viewSetup() {
-  return `<h1>Steady</h1>
-  <p>A training plan that starts with walking, three rotating weekly menus with meal prep and shopping lists, and a log for food, water, effort and health checks. It works offline, and everything you enter stays on this phone.</p>
-  <p class="sub">Your numbers set the calorie, protein and heart-rate targets. Resting heart rate is in the Health app under Heart.</p>
+  const feature = (ic, kind, title, text) => `<div class="feature"><span class="tile ${kind} tile-lg">${icon(ic)}</span><div><h3>${title}</h3><p>${text}</p></div></div>`;
+  return `<div class="welcome">
+    <img class="app-icon" src="icons/icon-192.png" alt="" width="84" height="84">
+    <h1 class="nav-title">Steady</h1>
+    <p class="lede">Training, meals and health checks in one place, at a pace you can keep.</p>
+    <div class="features">
+      ${feature('person-simple-walk', 'effort', 'A plan that starts with walking', 'Twelve weeks that build slowly, and hold back when a week goes badly.')}
+      ${feature('cooking-pot', 'fuel', 'Meals worked out for you', 'Three rotating menus, with the prep plan and shopping list for each week.')}
+      ${feature('lock-simple', 'water', 'Stays on this phone', 'It works offline, and nothing you enter leaves the phone unless you export it.')}
+    </div>
+  </div>
+  ${sectionHead('About you')}
   ${profileForm(null)}
-  <p class="sub">Moving phones or restoring? <label class="link">Import a backup<input type="file" accept=".json,application/json" data-act="import-backup" hidden></label></p>`;
+  <p class="center-foot">Moving phones? <label class="link">Import a backup<input type="file" accept=".json,application/json" data-act="import-backup" hidden></label></p>`;
 }
 
 function viewMore() {
   const p = state.profile;
   const st = state.settings;
   const rem = st.reminders || {};
-  return `<h1>More</h1>
-  <h2>You and your targets</h2>
+  const action = (act, ic, kind, title, extra = '') => `<button class="cell cell-button" data-act="${act}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div>${extra}<span class="accessory">${icon('caret-right')}</span></button>`;
+  const fileRow = (act, ic, kind, title) => `<label class="cell cell-button"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="accessory">${icon('caret-right')}</span><input type="file" accept=".json,application/json" data-act="${act}" hidden></label>`;
+  return `${nav('More', 'Targets, reminders and your data')}
+  ${sectionHead('You and your targets')}
   ${profileForm(p)}
-  <h2>Gym alerts</h2>
-  <label class="check"><input type="checkbox" data-act="setting" data-k="loudBeep" ${st.loudBeep ? 'checked' : ''}> Beep even when the phone is on silent (this can pause your music)</label>
-  <p class="sub">The screen also flashes when rest ends and at each interval change, and it stays on during a session. ${esc(WATCH_ALERT)}</p>
-  <h2>Hot months</h2>
-  <p class="sub">In these months, Today and the session screens remind you to train indoors or in the cool of the day.</p>
-  <div class="months">${MONTHS.map((m, i) => `<label class="check"><input type="checkbox" data-act="hot-month" data-n="${i + 1}" ${(st.hotMonths || []).includes(i + 1) ? 'checked' : ''}> ${m}</label>`).join('')}</div>
-  <h2>Reminders</h2>
-  <p class="sub">Web apps on iPhone cannot send their own reminders, so these go into your calendar as repeating events with an alert.</p>
-  <ul class="rows rem-list">${REMINDERS.map((r) => `<li><label class="check"><input type="checkbox" data-act="rem-on" data-id="${r.id}" ${rem[r.id]?.on === false ? '' : 'checked'}> ${esc(r.label)}</label>
-    <input type="time" data-act="rem-time" data-id="${r.id}" value="${esc(rem[r.id]?.time || r.time)}" aria-label="Time for ${esc(r.label)}"></li>`).join('')}</ul>
-  <div class="actions"><button class="btn primary" data-act="ics">Add to Calendar</button><button class="btn" data-act="ics-save">Save the calendar file</button></div>
-  <p class="sub">On the iPhone, tap Add All when the events appear. If nothing opens, save the file, then open it from Files. To change them later, delete the Steady events in Calendar and add them again.</p>
-  <h2>Your data</h2>
-  <p class="sub">Everything stays in this app's storage on this phone. ${ui.persisted ? 'The phone has agreed to keep it.' : ''} ${state.lastBackup ? `Last backup: ${esc(short(state.lastBackup))}.` : 'No backup yet.'}</p>
-  <div class="actions">
-    <button class="btn" data-act="export-open">Export backup</button>
-    <label class="btn">Import backup<input type="file" accept=".json,application/json" data-act="import-backup" hidden></label>
-    <label class="btn">Import Watch or checkup file<input type="file" accept=".json,application/json" data-act="import-data" hidden></label>
+  ${sectionHead('Gym alerts')}
+  <div class="group"><label class="cell switch-cell"><span class="tile fuel">${icon('speaker-high')}</span><span class="cell-main"><span class="cell-title">Beep on silent</span><span class="cell-sub">This can pause your music</span></span><input type="checkbox" class="switch" data-act="setting" data-k="loudBeep" ${st.loudBeep ? 'checked' : ''}></label></div>
+  ${foot(`The screen also flashes when rest ends and at each interval change, and it stays on during a session. ${esc(WATCH_ALERT)}`)}
+  ${sectionHead('Hot months')}
+  <div class="card months">${MONTHS.map((m, i) => `<label class="month"><input type="checkbox" data-act="hot-month" data-n="${i + 1}" ${(st.hotMonths || []).includes(i + 1) ? 'checked' : ''}><span>${m}</span></label>`).join('')}</div>
+  ${foot('In these months, Today and the session screens remind you to train indoors or in the cool of the day.')}
+  ${sectionHead('Reminders')}
+  <div class="group">${REMINDERS.map((r) => `<div class="cell switch-cell"><span class="cell-main"><span class="cell-title">${esc(r.label.split(',')[0])}</span><span class="cell-sub">${esc(r.label.split(', ').slice(1).join(', '))}</span></span>
+    <input type="time" class="time" data-act="rem-time" data-id="${r.id}" value="${esc(rem[r.id]?.time || r.time)}" aria-label="Time for ${esc(r.label)}">
+    <input type="checkbox" class="switch" data-act="rem-on" data-id="${r.id}" ${rem[r.id]?.on === false ? '' : 'checked'} aria-label="${esc(r.label)}"></div>`).join('')}
+    ${action('ics', 'calendar-plus', 'effort', 'Add to Calendar')}
+    ${action('ics-save', 'export', 'gray', 'Save the calendar file')}
   </div>
-  <p class="sub">The Watch file and the checkup file come from the Mac. Run export_for_app.py there, AirDrop the file to the phone, then import it here. Days you typed in yourself keep your numbers.</p>
-  <h2>iPhone shortcuts</h2>
-  <p class="sub">Two shortcuts move numbers without the Mac: one copies today's steps, Move and exercise minutes from Health into Steady, the other writes your food and water totals into Apple Health.</p>
-  <div class="actions"><button class="btn" data-act="shortcut-help">Show the steps</button></div>
-  <h2>How the numbers work</h2>
-  <ul>
+  ${foot('Web apps on iPhone cannot send their own reminders, so these go into Calendar as repeating events with an alert. Tap Add All when they appear. If nothing opens, save the file and open it from Files. To change them later, delete the Steady events in Calendar and add them again.')}
+  ${sectionHead('Your data')}
+  <div class="group">
+    ${action('export-open', 'cloud-arrow-up', 'water', 'Export backup', `<span class="cell-value">${state.lastBackup ? esc(short(state.lastBackup)) : 'Never'}</span>`)}
+    ${fileRow('import-backup', 'arrow-clockwise', 'gray', 'Import backup')}
+    ${fileRow('import-data', 'watch', 'effort', 'Import Watch or checkup file')}
+    ${action('shortcut-help', 'clipboard-text', 'fuel', 'iPhone shortcuts')}
+  </div>
+  ${foot(`Everything stays in this app's storage on this phone${ui.persisted ? ', and the phone has agreed to keep it' : ''}. The Watch and checkup files come from the Mac: run export_for_app.py there, AirDrop the file, then import it here. Days you typed in yourself keep your numbers.`)}
+  ${sectionHead('How the numbers work')}
+  <div class="card prose"><ul class="prose-list">
     <li>Calorie limit: resting energy (Mifflin-St Jeor) times 1.375, minus 550. It drops as your weight drops. After 4 weeks, Progress can replace it with your real burn.</li>
     <li>Protein: 1.3 g per kg of adjusted body weight. Fibre: 30 g.</li>
     <li>Water: the base plus 500 ml for every 30 exercise minutes, from the Watch or your logged sessions, whichever is higher.</li>
     <li>Heart rate ranges: 30, 40, 60 and 80% of heart-rate reserve.</li>
     <li>The plan holds a week when a week comes in under half, and every fourth week from week 16 is easier.</li>
     <li>Meal values are estimates for the portions in each recipe.</li>
-  </ul>
-  <h2>Stop and check</h2>
-  <ul>${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>
-  <h2>Start over</h2>
-  <div class="actions"><button class="btn danger" data-act="reset">Delete all data</button></div>`;
+  </ul></div>
+  ${sectionHead('Stop and check')}
+  <div class="card prose"><ul class="prose-list">${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>
+  <div class="group danger-group"><button class="cell cell-action danger" data-act="reset">${icon('trash')}<span>Delete all data</span></button></div>
+  ${foot('Icons by Phosphor Icons, MIT licence.')}`;
 }
 
 function sheetShortcuts() {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">iPhone shortcuts</h2>${CLOSE_BTN}</div>
-    <h3>Steady Watch: Health into Steady</h3><ol>${SHORTCUT_IN.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
-    <h3>Steady to Health: Steady into Health</h3><ol>${SHORTCUT_OUT.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
-    <p class="sub">Shortcuts menus differ a little between iOS versions. If a name doesn't match exactly, pick the closest one.</p></div>`;
+  return `<div class="sheet">${sheetHead('iPhone shortcuts')}
+    ${sectionHead('Steady Watch', 'Health into Steady')}<div class="card prose"><ol class="steps">${SHORTCUT_IN.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
+    ${sectionHead('Steady to Health', 'Steady into Health')}<div class="card prose"><ol class="steps">${SHORTCUT_OUT.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
+    ${foot('Shortcuts menus differ a little between iOS versions. If a name does not match exactly, pick the closest one.')}</div>`;
 }
-
 function sheetPaste() {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Paste Watch numbers</h2>${CLOSE_BTN}</div>
-    <p class="sub">The phone didn't let Steady read the clipboard. Long-press the box, tap Paste, then Use these numbers.</p>
-    <form class="form" data-form="paste"><textarea name="text" rows="5" aria-label="Pasted numbers"></textarea>
-    <button class="btn primary big" type="submit">Use these numbers</button></form></div>`;
+  return `<div class="sheet">${sheetHead('Paste Watch numbers')}
+    ${foot('The phone did not let Steady read the clipboard. Long-press the box, tap Paste, then Use these numbers.')}
+    <form data-form="paste"><div class="card"><textarea name="text" rows="5" aria-label="Pasted numbers"></textarea></div>
+    <button class="btn-start" type="submit">Use these numbers</button></form></div>`;
 }
-
 function sheetCopy(text) {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Totals for Health</h2>${CLOSE_BTN}</div>
-    <p class="sub">The phone didn't let Steady copy. Select the text, copy it, then run the Steady to Health shortcut.</p>
-    <textarea rows="4" readonly aria-label="Totals">${esc(text)}</textarea></div>`;
+  return `<div class="sheet">${sheetHead('Totals for Health')}
+    ${foot('The phone did not let Steady copy. Select the text, copy it, then run the Steady to Health shortcut.')}
+    <div class="card"><textarea rows="4" readonly aria-label="Totals">${esc(text)}</textarea></div></div>`;
 }
-
 function sheetExport() {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Export a backup</h2>${CLOSE_BTN}</div>
-    <form class="form" data-form="export">
-      <p class="sub">The file holds your weight, food, training and health checks. Add a passcode if it will sit in Files, iCloud or a chat. Without the passcode, nobody can open it, including you.</p>
-      <label>Passcode (optional)<input type="password" name="pass" autocomplete="new-password"></label>
-      <label>Passcode again<input type="password" name="pass2" autocomplete="new-password"></label>
-      <button class="btn primary big" type="submit">Export</button>
+  return `<div class="sheet">${sheetHead('Export a backup')}
+    <form data-form="export">
+      ${foot('The file holds your weight, food, training and health checks. Add a passcode if it will sit in Files, iCloud or a chat. Without the passcode nobody can open it, including you.')}
+      <div class="group">
+        <label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Passcode</span><input type="password" name="pass" autocomplete="new-password" placeholder="Optional"></label>
+        <label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Again</span><input type="password" name="pass2" autocomplete="new-password" placeholder="Optional"></label>
+      </div>
+      <button class="btn-start" type="submit">Export</button>
     </form></div>`;
 }
-
 function sheetUnlock() {
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Open a protected backup</h2>${CLOSE_BTN}</div>
-    <form class="form" data-form="unlock"><label>Passcode<input type="password" name="pass" required autocomplete="current-password"></label>
-    <button class="btn primary big" type="submit">Open</button></form></div>`;
+  return `<div class="sheet">${sheetHead('Open a protected backup')}
+    <form data-form="unlock"><div class="group"><label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Passcode</span><input type="password" name="pass" required autocomplete="current-password"></label></div>
+    <button class="btn-start" type="submit">Open</button></form></div>`;
 }
 
 // ---------- Sheet, tooltip, toast ----------
@@ -1074,7 +1135,7 @@ function hideTip() {
 let toastTimer = null;
 function toast(msg, undo = false) {
   const t = $('#toast');
-  t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="btn small" data-act="undo">Undo</button>' : ''}`;
+  t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="btn btn-sm toast-undo" data-act="undo">Undo</button>' : ''}`;
   t.classList.toggle('has-btn', undo);
   t.classList.add('show');
   clearTimeout(toastTimer);
@@ -1110,15 +1171,18 @@ function finishSheet() {
   const s = currentSession();
   const mins = Math.max(1, Math.round((Date.now() - state.active.start) / 60000));
   const rpe = DEFAULT_RPE[s.effort] ?? 5;
-  return `<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">Finish ${esc(s.name.toLowerCase())}</h2>${CLOSE_BTN}</div>
-    <form class="form" data-form="finish">
-      <label>Minutes<input name="min" inputmode="numeric" value="${mins}" required autocomplete="off"></label>
-      <div><div class="slot-label">How hard was it? (RPE, target ${esc(EFFORT[s.effort].rpe)})</div>
-        <div class="rpe" role="group" aria-label="RPE">${Array.from({ length: 10 }, (_, i) => `<button type="button" data-act="rpe" data-n="${i + 1}" aria-pressed="${i + 1 === rpe}">${i + 1}</button>`).join('')}</div>
-        <input type="hidden" name="rpe" value="${rpe}"></div>
-      <label>Average heart rate (optional)<input name="hr" inputmode="numeric" placeholder="From the Watch summary" autocomplete="off"></label>
-      <label>Note (optional)<input name="note" maxlength="200" autocomplete="off"></label>
-      <div class="actions"><button class="btn effort big" type="submit">Save session</button><button class="btn" type="button" data-act="discard">Discard</button></div>
+  return `<div class="sheet">${sheetHead(`Finish ${esc(s.name.toLowerCase())}`)}
+    <form data-form="finish">
+      <div class="group"><label class="cell field"><span class="tile effort">${icon('timer')}</span><span class="field-label">Minutes</span><input name="min" inputmode="numeric" value="${mins}" required autocomplete="off"><span class="unit">min</span></label></div>
+      ${sectionHead('How hard was it?', `target RPE ${esc(EFFORT[s.effort].rpe)}`)}
+      <div class="rpe" role="group" aria-label="RPE">${Array.from({ length: 10 }, (_, i) => `<button type="button" class="num" data-act="rpe" data-n="${i + 1}" aria-pressed="${i + 1 === rpe}">${i + 1}</button>`).join('')}</div>
+      <input type="hidden" name="rpe" value="${rpe}">
+      <div class="group">
+        <label class="cell field"><span class="tile fuel">${icon('heartbeat')}</span><span class="field-label">Average heart rate</span><input name="hr" inputmode="numeric" placeholder="Optional" autocomplete="off"><span class="unit">bpm</span></label>
+        <label class="cell field"><span class="tile gray">${icon('list-checks')}</span><span class="field-label">Note</span><input name="note" maxlength="200" autocomplete="off" placeholder="Optional"></label>
+      </div>
+      <button class="btn-start" type="submit">Save session</button>
+      <button class="btn btn-plain danger btn-wide" type="button" data-act="discard">Discard session</button>
     </form></div>`;
 }
 
@@ -1157,6 +1221,9 @@ function applyPaste(text) {
     toast(e.message);
   }
 }
+function pressSegment(el) {
+  el.parentElement.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+}
 
 const ACT = {
   tab: (el) => {
@@ -1168,6 +1235,14 @@ const ACT = {
   day: (el) => {
     const n = Number(el.dataset.n);
     ui.date = n === 0 ? todayISO() : L.addDays(ui.date, n);
+    render();
+  },
+  'day-pick': (el) => {
+    ui.date = el.dataset.date;
+    render();
+  },
+  strip: (el) => {
+    ui.date = L.addDays(ui.date, Number(el.dataset.n));
     render();
   },
   week: (el) => {
@@ -1235,7 +1310,7 @@ const ACT = {
   },
   recipe: (el) => {
     const m = L.MEAL_BY_ID[el.dataset.id];
-    showSheet(`<div class="sheet"><div class="sheet-head"><h2 id="sheet-title">${esc(m.name)}</h2>${CLOSE_BTN}</div>${recipeBody(m)}</div>`);
+    showSheet(`<div class="sheet">${sheetHead(esc(m.name))}<div class="card prose recipe">${recipeBody(m)}</div></div>`);
   },
   'swap-open': (el) => showSheet(sheetSwap(el.dataset.date, el.dataset.key, el.dataset.slot)),
   'swap-set': (el) => {
@@ -1257,13 +1332,13 @@ const ACT = {
     ui.portion = 1;
     showSheet(sheetAddFood());
   },
-  'add-slot': (el) => {
-    ui.addSlot = el.dataset.slot;
-    el.parentElement.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+  'add-slot-seg': (el) => {
+    ui.addSlot = el.dataset.id;
+    pressSegment(el);
   },
   portion: (el) => {
     ui.portion = Number(el.dataset.n);
-    el.parentElement.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+    pressSegment(el);
   },
   'add-food': (el) => {
     const kind = el.dataset.kind;
@@ -1357,7 +1432,7 @@ const ACT = {
   finish: () => showSheet(finishSheet()),
   rpe: (el) => {
     el.closest('form').elements.rpe.value = el.dataset.n;
-    el.parentElement.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
+    pressSegment(el);
   },
   discard: () => {
     if (!confirm('Discard this session without saving it?')) return;
@@ -1414,7 +1489,7 @@ const ACT = {
     render();
     toast('Unticked', true);
   },
-  range: (el) => { ui.range = Number(el.dataset.n); render(); },
+  range: (el) => { ui.range = Number(el.dataset.id); render(); },
   'use-limit': (el) => {
     snapshot();
     const n = Number(el.dataset.n);
@@ -1745,6 +1820,8 @@ async function importFile(input, kind) {
 }
 
 // ---------- Wiring ----------
+$('.tabs').innerHTML = TABS.map(([id, label, ic]) => `<button type="button" data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`).join('');
+
 document.addEventListener('click', (e) => {
   const tipEl = e.target.closest?.('[data-tip]');
   if (tipEl) showTip(tipEl, e);

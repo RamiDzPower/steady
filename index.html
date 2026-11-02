@@ -7,12 +7,13 @@
   <meta name="referrer" content="no-referrer">
   <title>Steady</title>
   <meta name="description" content="Training plan, meal plan and a food, water and effort log that works offline.">
-  <meta name="theme-color" content="#eef3f1" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0c1a1f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Steady">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="modulepreload" href="icons.js">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -20,6 +21,7 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
+  <header id="navbar" class="navbar" aria-hidden="true"><span id="navbar-title"></span></header>
   <main id="main" tabindex="-1"></main>
   <nav class="tabs" aria-label="Sections">
     <button type="button" data-act="tab" data-tab="today">Today</button>
