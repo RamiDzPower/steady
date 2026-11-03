@@ -1,0 +1,55 @@
+Exercise drawings
+
+The SVG files in this folder are exercise illustrations from Workout Guide.
+
+Title:   Workout Guide (exercise illustrations)
+Author:  Bryl Lim (https://bryllim.com)
+         Copyright (c) 2026 Bryl Lim, except where ATTRIBUTION.md identifies an upstream source.
+Source:  https://github.com/bryllim/workout-guide/tree/aac599224bb9780305239607ef98540b7e0ce389/packages/workout-guide/assets
+Licence: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+         Summary:   https://creativecommons.org/licenses/by-sa/4.0/
+         Full text: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Upstream source: Workout Guide traced some of its first frames from the Everkinetic
+exercise drawings (https://github.com/everkinetic/data), which are also under CC BY-SA 4.0.
+Workout Guide's ATTRIBUTION.md names this source, and its manifest.json records the
+source and the changes for each traced frame:
+https://github.com/bryllim/workout-guide/blob/aac599224bb9780305239607ef98540b7e0ce389/packages/workout-guide/manifest.json
+Four of the files here are among them. For each one, Workout Guide rasterised the
+Everkinetic drawing on a transparent 512 x 512 canvas, recoloured it for monochrome
+display and vector-traced it:
+
+  glute-bridge-1.svg          traced from Everkinetic 0109-tension.svg
+  leg-curl-1.svg              traced from Everkinetic 0117-tension.svg
+  machine-chest-press-1.svg   traced from Everkinetic 0066-tension.svg
+  seated-row-1.svg            traced from Everkinetic 0025-tension.svg
+
+Workout Guide credits the other files to Bryl Lim.
+
+Changes: none. Each file is a byte-for-byte copy of the original at the commit above.
+Only the names differ: assets/<exercise>/frame-<n>.svg is saved here as <exercise>-<n>.svg.
+The drawings are white on a transparent background. In light mode Steady shows them in
+black with a CSS filter at display time, which leaves the files themselves unchanged.
+
+Files and their originals (under packages/workout-guide/assets/ at the commit above):
+
+  dead-bug-3.svg                    dead-bug/frame-3.svg
+  dumbbell-romanian-deadlift-1.svg  dumbbell-romanian-deadlift/frame-1.svg
+  farmer-carry-1.svg                farmer-carry/frame-1.svg
+  glute-bridge-1.svg                glute-bridge/frame-1.svg
+  goblet-squat-1.svg                goblet-squat/frame-1.svg
+  hip-thrust-1.svg                  hip-thrust/frame-1.svg
+  incline-push-up-2.svg             incline-push-up/frame-2.svg
+  lat-pulldown-3.svg                lat-pulldown/frame-3.svg
+  leg-curl-1.svg                    leg-curl/frame-1.svg
+  leg-press-2.svg                   leg-press/frame-2.svg
+  machine-chest-press-1.svg         machine-chest-press/frame-1.svg
+  machine-shoulder-press-1.svg      machine-shoulder-press/frame-1.svg
+  one-arm-dumbbell-row-1.svg        one-arm-dumbbell-row/frame-1.svg
+  pallof-press-1.svg                pallof-press/frame-1.svg
+  plank-1.svg                       plank/frame-1.svg
+  plank-3.svg                       plank/frame-3.svg
+  seated-row-1.svg                  seated-row/frame-1.svg
+  step-up-2.svg                     step-up/frame-2.svg
+
+The ShareAlike terms cover these drawings only, not the rest of Steady.

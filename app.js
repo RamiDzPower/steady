@@ -1,8 +1,10 @@
 import * as L from './logic.js';
 import { icon } from './icons.js';
+import { summaryPdf } from './pdf.js';
 import {
   EFFORT, EXERCISES, SESSIONS, BLOCKS, PROGRESSION, DELOAD, HOT, HOT_LONGWALK, WATCH_ALERT, MEALS, MENU_NOTE, PANTRY, FOOD_SAFETY,
   EATING_OUT, RULES, SAFETY, SLOTS, LABS, WAIST_TARGET, BP_NOTE, BP_CRISIS, REMINDERS, SHORTCUT_IN, SHORTCUT_OUT,
+  APP_VERSION, CHANGES,
 } from './plan.js';
 
 const KEY = 'steady.v1';
@@ -10,6 +12,7 @@ const esc = L.esc;
 const $ = (s) => document.querySelector(s);
 const fmt = (n) => (n == null ? '' : Math.round(n).toLocaleString('en-GB'));
 const signed = (n) => (n > 0 ? `+${fmt(n)}` : n < 0 ? `−${fmt(-n)}` : '0');
+const signedDec = (n, dp = 1) => { const s = Math.abs(n).toFixed(dp); return +s ? `${n > 0 ? '+' : '−'}${s}` : s; };
 const litres = (ml) => (ml / 1000).toFixed(1);
 const todayISO = () => L.iso(new Date());
 const clock = () => new Date().toTimeString().slice(0, 5);
@@ -19,6 +22,10 @@ const int = (v) => { const n = parseInt(String(v ?? '').replace(/[^\d]/g, ''), 1
 const dec = (v) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : null; };
 const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
 const SLOT_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks', extra: 'Extras' };
+// The words for the two weekly counters, the same on Today and in the food lists.
+const flagText = (tags) => `${tags?.includes('sugary') ? ', sugary drink' : ''}${tags?.includes('purine') ? ', red meat, offal or shellfish' : ''}`;
+// Pass fib false for foods entered under Something else: the form never asks for fibre, so their 0 g is not a real value.
+const foodSub = (f, per = '', fib = true) => `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${fib ? `, ${fmt(f.fib || 0)} g fibre` : ''}${per}${flagText(f.tags)}`;
 const DEFAULT_RPE = { easy: 4, moderate: 5, hard: 7, strength: 7 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'chart-line-up'], ['more', 'More', 'dots-three-circle']];
@@ -28,8 +35,8 @@ const CLOSE_BTN = `<button class="icon-btn" data-act="sheet-close" aria-label="C
 
 let state = load();
 const ui = {
-  screen: 'today', tab: 'today', date: todayISO(), week: null, food: 'menu', foodWeek: 'this', progress: 'charts', range: 14,
-  session: null, addSlot: 'lunch', portion: 1, rest: null, phase: -1, persisted: false, onToday: true, updating: false, pendingFile: null,
+  screen: 'today', tab: 'today', date: todayISO(), week: null, food: 'menu', foodWeek: 'this', progress: 'charts', range: 14, reportDays: '91',
+  session: null, addSlot: 'lunch', portion: 1, rest: null, hold: null, phase: -1, persisted: false, onToday: true, updating: false, pendingFile: null,
 };
 let ticker = null;
 let wakeLock = null;
@@ -41,22 +48,28 @@ let titleObserver = null;
 // ---------- Storage ----------
 function blank() {
   return {
-    v: 1, profile: null, days: {}, custom: [], shopping: {}, swaps: {}, repeats: [], skipHolds: [], holdChecked: null,
+    v: 1, profile: null, days: {}, custom: [], shopping: {}, swaps: {}, excluded: [], repeats: [], skipHolds: [], autoHolds: [], holdChecked: null,
     labs: [], bp: [], waist: [], settings: { hotMonths: [3, 4, 5], loudBeep: false, reminders: {} }, lastBackup: null, active: null,
+    seenVersion: 0,
   };
 }
 function load() {
+  let raw = null;
   try {
-    const s = JSON.parse(localStorage.getItem(KEY));
+    raw = localStorage.getItem(KEY);
+    const s = JSON.parse(raw);
     if (s && s.v === 1) {
       const b = blank();
       if (s.shopping && Object.keys(s.shopping).some((k) => !/^\d{4}-\d{2}-\d{2}$/.test(k))) s.shopping = {}; // first release kept one flat list
       return { ...b, ...s, settings: { ...b.settings, ...(s.settings || {}) } };
     }
   } catch { /* fall through to a blank state */ }
+  // Set aside what this version cannot read, so the first save of the blank state cannot destroy the only copy.
+  try { if (raw) localStorage.setItem(`${KEY}.unreadable`, raw); } catch { /* storage full */ }
   return blank();
 }
 function save() {
+  L.applyHolds(state, todayISO()); // a paste or a late log can bring last week up to half, which lifts this week's automatic hold
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch {
@@ -184,7 +197,7 @@ function viewToday() {
   ${banners(d, pos, sessions)}
   <section class="card summary" aria-label="Food, water and exercise so far">
     <div class="rings">
-      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', `of ${fmt(t.kcal)}`, 'fork-knife')}
+      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', food.kcal > t.kcal ? `${fmt(food.kcal - t.kcal)} over` : `${fmt(t.kcal - food.kcal)} left`, 'fork-knife')}
       ${ring('water', 'Water', water, wTarget, litres(water), 'L', `of ${litres(wTarget)}`, 'drop')}
       ${ring('effort', 'Exercise', exDone, exPlan, String(exDone), 'min', exPlan ? `of ${exPlan}` : 'rest day', 'flame')}
     </div>
@@ -219,6 +232,16 @@ function viewToday() {
 function banners(d, pos, sessions) {
   const out = [];
   const today = todayISO();
+  const a = state.active;
+  if (a && SESSIONS[a.id]) {
+    const min = Math.max(1, Math.round(L.activeMs(a, Date.now()) / 60000));
+    const sofar = L.leftRunning(a, Date.now()) ? `Started ${esc(startedAt(a))}.` : `${fmt(min)} min so far.`;
+    out.push(callout('timer', `<p><strong>${a.pausedAt ? 'Paused' : 'Still running'}: ${esc(SESSIONS[a.id].name)}${a.date === today ? '' : ` for ${esc(short(a.date))}`}.</strong> ${sofar}</p>
+      <div class="btn-row"><button class="btn btn-fill btn-sm" data-act="resume" data-id="${esc(a.id)}" data-date="${esc(a.date)}">Resume</button><button class="btn btn-gray btn-sm" data-act="finish">Finish</button></div>`, 'effort'));
+  }
+  if (d === today && L.weighInDue(state, today)) {
+    out.push(callout('scales', '<p><strong>Weigh in before breakfast.</strong> Once a week is enough for the trend.</p><button class="btn btn-fill btn-sm" data-act="weigh-open">Weigh in</button>'));
+  }
   if (d === today && backupDue()) {
     out.push(callout('cloud-arrow-up', `<p><strong>Back up your log.</strong> It lives only on this phone. ${state.lastBackup ? `Last backup ${esc(short(state.lastBackup))}.` : 'There is no backup yet.'}</p><button class="btn btn-fill btn-sm" data-act="export-open">Back up now</button>`, 'warn'));
   }
@@ -261,9 +284,14 @@ function sessionRows(d, sessions, day) {
     const tile = `<span class="tile ${s.kind === 'rest' ? 'gray' : 'effort'}">${icon(sessionIcon(s))}</span>`;
     const body = `<div class="cell-main"><div class="cell-title">${esc(s.name)}</div><div class="cell-sub">${esc(meta + logged)}</div></div>`;
     if (s.kind === 'rest') return `<div class="cell">${tile}${body}</div>`;
+    const link = `<button class="cell-main as-link" data-act="open-session" data-id="${s.id}" data-date="${d}"><span class="cell-title">${esc(s.name)}</span><span class="cell-sub">${esc(meta + logged)}</span></button>`;
     if (s.id === 'walks') {
-      return `<div class="cell">${tile}<button class="cell-main as-link" data-act="open-session" data-id="${s.id}" data-date="${d}"><span class="cell-title">${esc(s.name)}</span><span class="cell-sub">${esc(meta + logged)}</span></button>
+      return `<div class="cell">${tile}${link}
         <button class="btn btn-tinted effort btn-sm" data-act="walk-log" data-date="${d}" aria-label="Log a 10 minute walk">+10 min</button></div>`;
+    }
+    if ((s.kind === 'cardio' || s.id === 'longwalk') && !done.length && !isActive(d, s.id)) {
+      return `<div class="cell">${tile}${link}
+        <button class="btn btn-tinted effort btn-sm" data-act="quick-log" data-id="${s.id}" data-date="${d}" data-n="${s.minutes}" aria-label="Log ${esc(s.name)} as planned, ${s.minutes} minutes">Log</button></div>`;
     }
     return `<button class="cell cell-button" data-act="open-session" data-id="${s.id}" data-date="${d}">${tile}${body}
       <span class="accessory ${done.length ? 'done' : ''}">${done.length ? icon('check-circle') : icon('caret-right')}</span></button>`;
@@ -287,10 +315,12 @@ function foodToday(d, day) {
           <button class="btn btn-tinted fuel btn-sm log${on ? ' on' : ''}" data-act="log-menu" data-slot="${slot}" data-id="${meal.id}" aria-pressed="${on}">${on ? `${icon('check')}Eaten` : 'Log'}</button></div>`;
       }),
       ...extra.map(({ f, i }) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(f.name)}</div>
-          <div class="cell-sub">${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${f.t ? `, ${esc(f.t)}` : ''}${f.tags?.includes('sugary') ? ', sugary drink' : ''}${f.tags?.includes('purine') ? ', red meat, offal or shellfish' : ''}</div></div>
+          <div class="cell-sub">${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${f.t ? `, ${esc(f.t)}` : ''}${flagText(f.tags)}</div></div>
           <button class="icon-btn" data-act="food-del" data-i="${i}" aria-label="Remove ${esc(f.name)}">${icon('x')}</button></div>`),
     ];
-    return `<p class="group-label">${SLOT_LABEL[slot]}</p><div class="group">${rows.join('')}</div>`;
+    const label = SLOT_LABEL[slot];
+    return `<div class="group-head"><p class="group-label">${label}</p><button class="icon-btn" data-act="add-to" data-slot="${slot}" aria-label="Add to ${label.toLowerCase()}">${icon('plus')}</button></div>
+      <div class="group">${rows.join('')}</div>`;
   }).join('');
   return `${groups}
     <div class="group actions-group">
@@ -324,8 +354,8 @@ function watchForm(d, day) {
 
 function weightForm(d, day) {
   const last = L.weighIns(state).filter(([x]) => x <= d).at(-1);
-  return `<div class="group"><label class="cell field"><span class="tile gray">${icon('scales')}</span><span class="field-label">${esc(short(d))}</span>
-    <input inputmode="decimal" data-act="weight" value="${esc(day?.weight ?? '')}" placeholder="${(last?.[1] ?? state.profile.startWeight).toFixed(1)}" autocomplete="off"><span class="unit">kg</span></label></div>
+  return `<div class="group"><button class="cell cell-button" data-act="weigh-open" data-id="row"><span class="tile gray">${icon('scales')}</span><span class="cell-main"><span class="cell-title">${esc(short(d))}</span></span>
+    <span class="cell-value">${day?.weight ? `${day.weight.toFixed(1)} kg` : 'Weigh in'}</span><span class="accessory">${icon('caret-right')}</span></button></div>
     ${foot(`${last ? `Last weigh-in ${esc(short(last[0]))}: ${last[1].toFixed(1)} kg.` : `Start: ${state.profile.startWeight.toFixed(1)} kg.`} Once a week, same morning, before breakfast.`)}`;
 }
 
@@ -431,14 +461,15 @@ function viewSession() {
   ${hr && s.kind !== 'strength' ? callout('watch', `<p>${esc(WATCH_ALERT)}</p>`) : ''}
   ${otherActive ? callout('warning', `<p>Another session is running (${esc(SESSIONS[state.active.id]?.name ?? '')}). Starting this one discards it.</p>`, 'warn') : ''}
   ${active
-    ? `<div class="card timer-card"><div class="timer-label">Elapsed</div><div class="timer num" id="elapsed">0:00</div><button class="btn-start" data-act="finish">Finish</button></div>`
+    ? `<div class="card timer-card${active.pausedAt ? ' paused' : ''}"><div class="timer-label">${active.pausedAt ? 'Paused' : 'Elapsed'}</div><div class="timer num" id="elapsed">0:00</div>
+      <div class="start-row"><button class="btn-start" data-act="finish">Finish</button><button class="btn btn-gray btn-wide" data-act="pause">${active.pausedAt ? `${icon('play')}Resume` : `${icon('pause')}Pause`}</button></div></div>`
     : `<div class="start-row"><button class="btn-start" data-act="start">${icon('play')}Start</button>${s.id === 'walks'
       ? '<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
       : `<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}
   ${s.id === 'intervals' && active ? '<div class="card phase" id="phase"></div>' : ''}
   ${s.id === 'intervals' ? foot(`Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.`) : ''}
-  <div id="rest" class="rest" hidden></div>
   ${s.exercises ? `<div class="exlist">${s.exercises.map(([exId, sets, spec, rest], i) => exerciseCard(exId, sets, spec, rest, i, active)).join('')}</div>${foot(esc(PROGRESSION))}` : ''}
+  <div id="rest" class="rest" hidden></div>
   ${logged.length ? `${sectionHead('Logged')}<div class="group">${logged.map(({ w, i }) => `<div class="cell"><span class="tile effort">${icon('check')}</span><div class="cell-main"><div class="cell-title">${w.min} min, RPE ${w.rpe}${w.hr ? `, ${w.hr} bpm` : ''}</div>
       <div class="cell-sub">${esc(w.t || '')}${w.note ? `. ${esc(w.note)}` : ''}${w.ex?.length ? `. ${esc(w.ex.filter((e) => e.kg || e.reps).map((e) => `${EXERCISES[e.id]?.name}: ${e.kg ? `${e.kg} kg × ` : ''}${e.reps ?? ''}`).join(', '))}` : ''}</div></div>
       <button class="icon-btn" data-act="workout-del" data-i="${i}" aria-label="Remove this log">${icon('x')}</button></div>`).join('')}</div>` : ''}`;
@@ -453,15 +484,17 @@ function exerciseCard(exId, sets, spec, rest, i, active) {
   const unitLabel = unit === 's' ? 'Seconds' : unit === 'm' ? 'Metres' : 'Reps';
   const kg = active?.log?.[i]?.kg ?? last?.kg ?? '';
   const rp = active?.log?.[i]?.reps ?? last?.reps ?? L.repSpec(spec).top ?? '';
+  const held = active && ui.hold?.i === i ? ui.hold.k : -1;
   return `<section class="card ex"><div class="ex-head"><span class="ex-num num">${i + 1}</span><div><h3 class="ex-name">${esc(ex.name)}</h3><p class="ex-meta">${sets} sets of ${esc(spec)}, ${rest} s rest</p></div></div>
+    ${ex.pic ? `<img class="ex-pic" src="img/ex/${esc(ex.pic)}.svg" alt="" width="512" height="512">` : ''}
     <p class="cue">${esc(ex.cue)}</p><p class="ex-alt">${esc(ex.alt)}</p>
     ${last ? `<p class="ex-last">Last time, ${esc(short(last.date))}: ${last.kg ? `${last.kg} kg, ` : ''}${last.reps ?? '?'} ${unitLabel.toLowerCase()}, ${last.sets} of ${last.planned} sets. ${esc(hint)}</p>` : ''}
     <div class="ex-log">
       <label class="pill-field"><span>kg</span><input inputmode="decimal" data-act="ex-kg" data-i="${i}" value="${esc(kg)}" placeholder="body" autocomplete="off"></label>
       <label class="pill-field"><span>${unitLabel}</span><input inputmode="numeric" data-act="ex-reps" data-i="${i}" value="${esc(rp)}" autocomplete="off"></label>
     </div>
-    <div class="sets">${Array.from({ length: sets }, (_, k) => `<button class="setbtn num" data-act="set" data-i="${i}" data-k="${k}" aria-pressed="${k < done}" aria-label="Set ${k + 1}">${k < done ? icon('check') : k + 1}</button>`).join('')}
-      <button class="btn btn-gray btn-sm" data-act="rest" data-sec="${rest}">${icon('timer')}Rest ${rest} s</button></div></section>`;
+    <div class="sets">${Array.from({ length: sets }, (_, k) => `<button class="setbtn num" data-act="set" data-i="${i}" data-k="${k}" aria-pressed="${k < done}" aria-label="Set ${k + 1}${k === held ? ', holding' : ''}">${k < done ? icon('check') : k === held ? icon('timer') : k + 1}<label class="tap" aria-hidden="true"><input type="checkbox" switch></label></button>`).join('')}
+      <button class="btn btn-gray btn-sm" data-act="rest" data-i="${i}" data-sec="${rest}">${icon('timer')}Rest ${rest} s</button></div></section>`;
 }
 
 function intervalPhases(n) {
@@ -474,8 +507,9 @@ const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart
 
 function tick() {
   const a = state.active;
-  if (a && ui.session && isActive(ui.session.date, ui.session.id)) {
-    const secs = (Date.now() - a.start) / 1000;
+  const on = a && ui.session && isActive(ui.session.date, ui.session.id);
+  if (on) {
+    const secs = L.activeMs(a, Date.now()) / 1000;
     const el = $('#elapsed');
     if (el) el.textContent = mmss(secs);
     const ph = $('#phase');
@@ -500,23 +534,86 @@ function tick() {
     }
   }
   const r = $('#rest');
-  if (r && ui.rest) {
-    const left = Math.ceil((ui.rest.until - Date.now()) / 1000);
-    r.hidden = false;
-    if (left > 0) {
-      r.className = 'rest';
-      r.innerHTML = `<div><div class="rest-label">Rest</div><div class="rest-time num">${mmss(left)}</div></div><button class="btn btn-gray btn-sm" data-act="rest-skip">Skip</button>`;
-    } else {
-      if (!ui.rest.beeped) {
-        ui.rest.beeped = true;
-        beep(2);
-        flash('Rest over. Next set.', 'easy');
-      }
-      r.className = 'rest go';
-      r.innerHTML = '<div><div class="rest-label">Rest is over</div><div class="rest-time">Go</div></div><button class="btn btn-gray btn-sm" data-act="rest-skip">OK</button>';
-      if (left < -8) { ui.rest = null; r.hidden = true; }
+  if (!r) return;
+  const exs = on ? currentSession().exercises : null;
+  const name = (i) => esc(EXERCISES[exs[i][0]].name);
+  const h = on && ui.hold;
+  if (h) {
+    const left = Math.ceil((h.until - Date.now()) / 1000);
+    if (left <= 0) return holdDone();
+    const first = h.sides && left > h.sec;
+    if (h.sides && !first && !h.switched) {
+      h.switched = true;
+      beep(1);
+      flash('Switch sides', 'easy');
     }
+    return bar(r, 'rest', h.sides ? `Hold, ${first ? 'first' : 'second'} side` : 'Hold', mmss(first ? left - h.sec : left), `${name(h.i)}, set ${h.k + 1} of ${exs[h.i][1]}`, '<button class="btn btn-gray btn-sm" data-act="hold-done">Done</button>');
   }
+  const up = exs && L.nextUp(exs, a.sets, ui.rest?.i ?? 0);
+  const next = up ? `Next: ${name(up.i)}, set ${up.set} of ${up.of}` : '';
+  if (ui.rest) {
+    const left = Math.ceil((ui.rest.until - Date.now()) / 1000);
+    if (left > 0) return bar(r, 'rest', 'Rest', mmss(left), next, '<button class="btn btn-gray btn-sm" data-act="rest-skip">Skip</button>');
+    if (!ui.rest.beeped) {
+      ui.rest.beeped = true;
+      beep(2);
+      flash('Rest over. Next set.', 'easy');
+    }
+    if (left >= -8) return bar(r, 'rest go', 'Rest is over', 'Go', next, '<button class="btn btn-gray btn-sm" data-act="rest-skip">OK</button>');
+    ui.rest = null;
+  }
+  if (exs && !up) return bar(r, 'rest done', '', 'All sets done', '', '<button class="btn btn-fill btn-sm" data-act="finish">Finish</button>');
+  if (up && r.contains(document.activeElement)) focusSet(up.i, up.set - 1); // the bar takes its button with it
+  r.hidden = true;
+}
+const focusSet = (i, k) => $(`#main [data-act="set"][data-i="${i}"][data-k="${k}"]`)?.focus();
+// The bar rewrites its markup only when the content changes, so its button stays pressable and keeps focus between ticks.
+function bar(r, cls, label, time, sub, btn) {
+  const html = `<div>${label ? `<div class="rest-label">${label}</div>` : ''}<div class="rest-time"></div>${sub ? `<div class="rest-next">${sub}</div>` : ''}</div>${btn}`;
+  r.hidden = false;
+  r.className = cls;
+  if (r.dataset.html !== html) {
+    const had = r.contains(document.activeElement);
+    r.innerHTML = html;
+    r.dataset.html = html;
+    if (had) r.querySelector('button').focus({ preventScroll: true }); // a new label must not drop the focus its button had
+  }
+  r.querySelector('.rest-time').textContent = time;
+}
+// Ticks set k and the ones before it, or unticks from k if it was done. A new set starts the rest, unless nothing is left.
+function tickSet(i, k, show = render) {
+  const exs = currentSession().exercises;
+  const done = state.active.sets[i] ?? 0;
+  const next = k < done ? k : k + 1;
+  state.active.sets[i] = next;
+  if (next > done) {
+    // A set done means training again, so it ends a pause rather than starting a rest on a stopped clock.
+    L.setPaused(state.active, false, Date.now());
+    ui.rest = L.nextUp(exs, state.active.sets, i) ? { until: Date.now() + exs[i][3] * 1000, beeped: false, i } : null;
+  }
+  save();
+  show();
+}
+function startHold(i, k) {
+  const [, , spec] = currentSession().exercises[i];
+  const sec = state.active.log[i]?.reps || L.repSpec(spec).top;
+  // A hold done on each side runs twice, with a beep to switch sides halfway.
+  const sides = /\beach\b/.test(spec);
+  // A hold ends a pause too, and the save keeps the session if this tap is the one that started it.
+  L.setPaused(state.active, false, Date.now());
+  save();
+  ui.rest = null;
+  ui.hold = { i, k, sec, sides, until: Date.now() + sec * (sides ? 2000 : 1000) };
+  render();
+}
+function holdDone() {
+  const { i, k } = ui.hold;
+  ui.hold = null;
+  beep(2);
+  flash('Hold done', 'easy');
+  if ($('#rest').contains(document.activeElement)) focusSet(i, k); // its Done button goes with the hold
+  // The timer ends the hold, so a kg, reps or seconds box being typed in keeps its number until it loses focus.
+  tickSet(i, k, renderWhenIdle);
 }
 function startTicker() {
   ui.phase = -1;
@@ -598,6 +695,7 @@ function recipeBody(m) {
 function foodMenu() {
   const monday = foodMonday();
   const t = tgt(todayISO());
+  const off = (state.excluded || []).map((id) => L.MEAL_BY_ID[id]).filter(Boolean);
   return `${foot(`Each day comes to about 2,100 to 2,300 kcal and over 140 g of protein. Your limit is ${fmt(t.kcal)} kcal, so there is room for the odd extra. ${esc(MENU_NOTE)}`)}
   ${Array.from({ length: 7 }, (_, i) => {
     const date = L.addDays(monday, i);
@@ -606,12 +704,16 @@ function foodMenu() {
     return `${sectionHead(esc(dateText(date, { weekday: 'long', day: 'numeric', month: 'short' })), `${fmt(tot.kcal)} kcal, ${tot.p} g protein`)}
       <div class="group">${items.map(({ key, slot, meal, swapped }) => `<div class="cell"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}"><span class="cell-title">${esc(meal.name)}</span><span class="cell-sub">${SLOT_LABEL[slot]}, ${meal.kcal} kcal${swapped ? ', swapped in' : ''}</span></button>
         <button class="icon-btn" data-act="swap-open" data-date="${date}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}</button></div>`).join('')}</div>`;
-  }).join('')}`;
+  }).join('')}
+  ${off.length ? `${sectionHead('Not suggested')}<div class="group">${off.map((m) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(m.name)}</div><div class="cell-sub">${SLOT_LABEL[m.slot]}, ${m.kcal} kcal</div></div>
+      <button class="btn btn-gray btn-sm" data-act="include" data-id="${esc(m.id)}" aria-label="Suggest again: ${esc(m.name)}">Suggest again</button></div>`).join('')}</div>
+    ${foot('These stay out of the menus, the prep plan and the shopping list. A similar meal takes their place.')}` : ''}`;
 }
 
 function foodRecipes() {
   return SLOTS.map((slot) => `${sectionHead(SLOT_LABEL[slot])}<div class="group">${MEALS.filter((m) => m.slot === slot).map((m) => `<details class="cell-details"><summary class="cell"><div class="cell-main"><span class="cell-title">${esc(m.name)}</span><span class="cell-sub">${m.kcal} kcal, ${m.p} g protein</span></div><span class="accessory">${icon('caret-right')}</span></summary><div class="details-body">${recipeBody(m)}</div></details>`).join('')}</div>`).join('')
-    + `${sectionHead('Extras to log honestly')}${foot(`Typical values, so they go in the log in one tap: ${MEALS.filter((m) => m.slot === 'extra').map((m) => `${esc(m.name)} ${m.kcal}`).join(', ')} kcal.`)}`;
+    + `${sectionHead('Extras to log honestly')}<div class="group">${MEALS.filter((m) => m.slot === 'extra').map((m) => `<div class="cell"><div class="cell-main"><span class="cell-title">${esc(m.name)}</span><span class="cell-sub">${esc(foodSub(m))}</span></div></div>`).join('')}</div>
+    ${foot('Typical values for one portion, so they go in the log in one tap from Add food. The sources of the Thai dish values are credited at the bottom of More.')}`;
 }
 
 function foodPrep() {
@@ -632,9 +734,12 @@ function foodShopping() {
   const ticks = state.shopping[monday] || {};
   const groups = L.shoppingFor(state, monday);
   const row = (key, name, amount) => `<label class="cell check-cell"><input type="checkbox" class="round-check" data-act="shop" data-item="${esc(key)}" ${ticks[key] ? 'checked' : ''}><span class="cell-main"><span class="cell-title">${esc(name)}</span></span>${amount ? `<span class="cell-value num">${esc(amount)}</span>` : ''}</label>`;
-  const total = groups.reduce((n, g) => n + g.items.length, 0) + PANTRY.length;
-  const done = Object.keys(ticks).length;
-  return `${foot(`Everything for the week of ${esc(short(monday))}, worked out from that week's menu and your swaps. Shop before the Sunday prep. ${done} of ${total} ticked.`)}
+  // Count only what is on the list now: a swap or an exclusion can leave ticks behind for items it removed.
+  const keys = [...groups.flatMap((g) => g.items.map((it) => it.key)), ...PANTRY.map((_, i) => `pantry:${i}`)];
+  const total = keys.length;
+  const done = keys.filter((k) => ticks[k]).length;
+  return `<div class="group actions-group"><button class="cell cell-action" data-act="shop-share" ${done < total ? '' : 'disabled'}>${icon('export')}<span>Share the list</span></button></div>
+  ${foot(`Everything for the week of ${esc(short(monday))}, worked out from that week's menu and your swaps. Shop before the Sunday prep. ${done} of ${total} ticked.`)}
   ${groups.map((g) => `${sectionHead(esc(g.name))}<div class="group">${g.items.map((it) => row(it.key, it.name, it.amount)).join('')}</div>`).join('')}
   ${sectionHead('Check the cupboard')}<div class="group">${PANTRY.map((x, i) => row(`pantry:${i}`, x, '')).join('')}</div>
   <div class="group actions-group"><button class="cell cell-action" data-act="shop-clear" ${done ? '' : 'disabled'}>${icon('arrow-u-up-left')}<span>Untick everything</span></button></div>`;
@@ -658,6 +763,11 @@ function slotNow() {
   if (h >= 17 && h < 21.5) return 'dinner';
   return 'snack';
 }
+function openAddFood(slot) {
+  ui.addSlot = slot;
+  ui.portion = 1;
+  showSheet(sheetAddFood());
+}
 
 function recentFoods() {
   const seen = new Set();
@@ -674,6 +784,8 @@ function recentFoods() {
 }
 
 const sheetHead = (title) => `<div class="grabber" aria-hidden="true"></div><div class="sheet-head"><h2 id="sheet-title">${title}</h2>${CLOSE_BTN}</div>`;
+// Where toast() puts a message while the sheet is open, as the sheet covers the toast.
+const formError = (id) => `<p class="section-foot form-error" id="${id}" role="alert"></p>`;
 
 function sheetAddFood(query = '') {
   return `<div class="sheet">${sheetHead('Add food')}
@@ -689,41 +801,46 @@ function sheetAddFood(query = '') {
         <label class="cell field"><span class="field-label">Protein</span><input name="p" inputmode="numeric" autocomplete="off" placeholder="0"><span class="unit">g</span></label>
         <label class="cell field"><span class="field-label">Values are</span><select name="per"><option value="portion">for the portion</option><option value="100g">per 100 g</option></select></label>
         <label class="cell field"><span class="field-label">Grams eaten</span><input name="grams" inputmode="numeric" placeholder="if per 100 g" autocomplete="off"><span class="unit">g</span></label>
-        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Sugary drink</span></span><input type="checkbox" class="switch" name="sugary"></label>
-        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Red meat, offal or shellfish</span></span><input type="checkbox" class="switch" name="purine"></label>
-        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Save to my foods</span></span><input type="checkbox" class="switch" name="fav" checked></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Sugary drink</span></span><input type="checkbox" class="switch" switch name="sugary"></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Red meat, offal or shellfish</span></span><input type="checkbox" class="switch" switch name="purine"></label>
+        <label class="cell switch-cell"><span class="cell-main"><span class="cell-title">Save to my foods</span></span><input type="checkbox" class="switch" switch name="fav" checked></label>
       </div>
+      ${formError('quick-error')}
       <button class="btn-start" type="submit">Add</button>
     </form>
   </div>`;
 }
 
 function foodListItems(query) {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   const row = (name, sub, act, attrs, extra = '') => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(name)}</div><div class="cell-sub">${esc(sub)}</div></div>${extra}<button class="btn btn-tinted fuel btn-sm" data-act="${act}" ${attrs}>Add</button></div>`;
   const head = (t) => `<div class="cell list-head">${t}</div>`;
   const recent = q ? [] : recentFoods();
-  const own = state.custom.filter((c) => !q || c.name.toLowerCase().includes(q));
-  const lib = MEALS.filter((m) => !q || m.name.toLowerCase().includes(q)).slice(0, 80);
+  const own = state.custom.filter((c) => !q || L.matches(c.name, q));
+  const lib = MEALS.filter((m) => !q || L.matches(m.name, q)).slice(0, 80);
   const parts = [];
-  if (recent.length) parts.push(head('Recent'), ...recent.map((f, i) => row(f.name, `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein`, 'add-recent', `data-i="${i}"`)));
+  if (recent.length) parts.push(head('Recent'), ...recent.map((f, i) => row(f.name, foodSub(f, '', !!f.ref), 'add-recent', `data-i="${i}"`)));
   if (own.length) {
     parts.push(head('My foods'), ...own.map((c) => (c.per === '100g'
-      ? row(c.name, `${fmt(c.kcal)} kcal and ${fmt(c.p)} g protein per 100 g`, 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`, `<input class="grams" inputmode="numeric" data-grams="${esc(c.id)}" value="100" aria-label="Grams of ${esc(c.name)}">`)
-      : row(c.name, `${fmt(c.kcal)} kcal, ${fmt(c.p)} g protein`, 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`))));
+      ? row(c.name, foodSub(c, ' per 100 g', false), 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`, `<input class="grams" inputmode="numeric" data-grams="${esc(c.id)}" value="100" aria-label="Grams of ${esc(c.name)}">`)
+      : row(c.name, foodSub(c, '', false), 'add-food', `data-kind="custom" data-id="${esc(c.id)}"`))));
   }
-  if (lib.length) parts.push(head('Meals and extras'), ...lib.map((m) => row(m.name, `${m.kcal} kcal, ${m.p} g protein`, 'add-food', `data-kind="meal" data-id="${m.id}"`)));
+  if (lib.length) parts.push(head('Meals and extras'), ...lib.map((m) => row(m.name, foodSub(m), 'add-food', `data-kind="meal" data-id="${m.id}"`)));
   return parts.join('') || '<div class="cell"><div class="cell-main"><div class="cell-sub">Nothing matches. Add it under Something else.</div></div></div>';
 }
 
 function sheetSwap(date, key, slot) {
   const current = L.menuFor(date, state).find((x) => x.key === key);
-  const opts = L.swapOptions(slot);
+  const opts = L.swapOptions(slot, state.excluded);
+  // A row keeps an excluded meal that was already eaten, and that meal needs no second exclude action.
+  const canExclude = opts.length > 1 && opts.some((m) => m.id === current.meal.id);
   return `<div class="sheet">${sheetHead(`Swap ${SLOT_LABEL[slot].toLowerCase()}`)}
     ${foot(`${esc(dateText(date))}. Planned: ${esc(L.MEAL_BY_ID[current.planned].name)}.`)}
     ${current.swapped ? `<div class="group actions-group"><button class="cell cell-action" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="">${icon('arrow-u-up-left')}<span>Back to the plan</span></button></div>` : ''}
     <div class="group sheet-list">${opts.map((m) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(m.name)}</div><div class="cell-sub">${m.kcal} kcal, ${m.p} g protein, ${m.fib} g fibre</div></div>
-      ${m.id === current.meal.id ? `<span class="accessory done">${icon('check-circle')}</span>` : `<button class="btn btn-gray btn-sm" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="${m.id}">Choose</button>`}</div>`).join('')}</div></div>`;
+      ${m.id === current.meal.id ? `<span class="accessory done">${icon('check-circle')}</span>` : `<button class="btn btn-gray btn-sm" data-act="swap-set" data-date="${date}" data-key="${key}" data-id="${m.id}">Choose</button>`}</div>`).join('')}</div>
+    ${canExclude ? `<div class="group danger-group"><button class="cell cell-action danger" data-act="exclude" data-id="${esc(current.meal.id)}">${icon('x')}<span>Do not suggest this again</span></button></div>
+      ${foot(`This takes ${esc(current.meal.name)} out of all three menus and puts a similar meal in its place. The prep plan and shopping list follow. You can bring it back in Food, Menu.`)}` : ''}</div>`;
 }
 
 // ---------- Progress ----------
@@ -749,9 +866,11 @@ function xLabels(dates, xAt) {
 function legend(items) {
   return `<div class="legend">${items.map(([cls, label]) => `<span class="key"><i class="${cls}"></i>${label}</span>`).join('')}</div>`;
 }
-function chartBox(title, big, legendHtml, svg) {
-  return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. Tap a day for its numbers.">${svg}</svg></section>`;
+function chartBox(title, big, legendHtml, svg, hint = 'Tap a day for its numbers.') {
+  return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. ${hint}">${svg}</svg></section>`;
 }
+// A finger-sized tap area over a dot, as the dots on the weight and VO2max charts are under 10 px across.
+const dotHit = (cx, cy, tip) => `<circle class="hit" cx="${cx}" cy="${cy}" r="14" data-tip="${esc(tip)}"/>`;
 function hits(n, bw, tip) {
   return Array.from({ length: n }, (_, i) => `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${CH - PT - PB}" data-tip="${esc(tip(i))}"/>`).join('');
 }
@@ -814,7 +933,24 @@ function exerciseChart(mondays) {
   const labels = rows.map((r, i) => `<text class="ax" x="${xAt(i)}" y="${CH - 6}" text-anchor="middle">${esc(short(r.m))}</text>`).filter((_, i) => mondays.length <= 6 || i % 2 === (mondays.length - 1) % 2).join('');
   const tip = (i) => `Week of ${short(rows[i].m)}\nExercise: ${rows[i].ex} min\nTarget: ${rows[i].target ? `${rows[i].target} min` : 'none'}`;
   const last = rows.at(-1);
-  return chartBox('Exercise minutes', bigNum(last.ex, 'min', `this week${last.target ? ` of ${last.target}` : ''}`), legend([['sw-effort', 'Done'], ['sw-ink ln', 'Weekly target']]), `${s}${bars}${ticks}${labels}${hits(mondays.length, bw, tip)}`);
+  return chartBox('Exercise minutes', bigNum(last.ex, 'min', `this week${last.target ? ` of ${last.target}` : ''}`), legend([['sw-effort', 'Done'], ['sw-ink ln', 'Weekly target']]), `${s}${bars}${ticks}${labels}${hits(mondays.length, bw, tip)}`, 'Tap a week for its numbers.');
+}
+
+// One date axis for the weight and VO2max charts, so the two read the same way.
+function timeAxis(startD, endD, vals) {
+  const span = Math.max(1, L.diffDays(startD, endD));
+  const step = Math.max(...vals) - Math.min(...vals) > 10 ? 4 : 2;
+  const lo = Math.floor((Math.min(...vals) - 1) / step) * step, hi = Math.ceil((Math.max(...vals) + 1) / step) * step;
+  const yv = (v) => PT + (CH - PT - PB) * (1 - (v - lo) / (hi - lo));
+  const x = (d) => PL + ((CW - PL - PR) * L.diffDays(startD, d)) / span;
+  let s = '';
+  for (let v = lo; v <= hi; v += step) s += `<line class="grid" x1="${PL}" x2="${CW - PR}" y1="${yv(v)}" y2="${yv(v)}"/><text class="ax" x="${PL - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let i = 0; i <= 3; i++) {
+    const d = L.addDays(startD, Math.round((span * i) / 3));
+    s += `<text class="ax" x="${x(d)}" y="${CH - 6}" text-anchor="${i === 0 ? 'start' : i === 3 ? 'end' : 'middle'}">${esc(short(d))}</text>`;
+  }
+  const line = (pts, cls) => (pts.length > 1 ? `<path class="${cls}" d="${pts.map(([d, v], i) => `${i ? 'L' : 'M'}${x(d).toFixed(1)},${yv(v).toFixed(1)}`).join('')}"/>` : '');
+  return { x, yv, s, line };
 }
 
 function weightChart() {
@@ -823,10 +959,12 @@ function weightChart() {
   const ins = L.weighIns(state).filter(([d]) => d >= windowFrom);
   const trend = L.weightTrend(state).filter(([d]) => d >= windowFrom);
   const today = todayISO();
+  const rate = L.weightRate(state, today).kgPerWeek;
+  const last = trend.at(-1);
+  const pace = last && rate != null ? [last, [L.addDays(last[0], 28), last[1] + rate * 4]] : [];
   const startD = [p.startDate, ins[0]?.[0] ?? p.startDate].sort()[0];
   const lastD = [today, ins.at(-1)?.[0] ?? today].sort().at(-1);
-  const endD = [L.addDays(lastD, 14), L.addDays(p.startDate, 84)].sort().at(-1);
-  const span = Math.max(1, L.diffDays(startD, endD));
+  const endD = [L.addDays(lastD, 14), L.addDays(p.startDate, 84), pace[1]?.[0] ?? today].sort().at(-1);
   const goal = L.goalPath(p);
   const goalAt = (d) => {
     if (d <= goal[0][0]) return goal[0][1];
@@ -841,23 +979,61 @@ function weightChart() {
   const goalPts = [[startD, goalAt(startD)], ...goal.filter(([d]) => d > startD && d < endD), [endD, goalAt(endD)]];
   const pred = L.predictedWeights(state, today, L.addDays(p.startDate, -7));
   const predOk = pred.weeks >= 1;
-  const vals = [...ins.map((x) => x[1]), ...goalPts.map((x) => x[1]), ...(predOk ? pred.points.map((x) => x[1]) : [])];
-  const step = Math.max(...vals) - Math.min(...vals) > 10 ? 4 : 2;
-  const lo = Math.floor((Math.min(...vals) - 1) / step) * step, hi = Math.ceil((Math.max(...vals) + 1) / step) * step;
-  const yv = (v) => PT + (CH - PT - PB) * (1 - (v - lo) / (hi - lo));
-  const x = (d) => PL + ((CW - PL - PR) * L.diffDays(startD, d)) / span;
-  let s = '';
-  for (let v = lo; v <= hi; v += step) s += `<line class="grid" x1="${PL}" x2="${CW - PR}" y1="${yv(v)}" y2="${yv(v)}"/><text class="ax" x="${PL - 6}" y="${yv(v) + 4}" text-anchor="end">${v}</text>`;
-  for (let i = 0; i <= 3; i++) {
-    const d = L.addDays(startD, Math.round((span * i) / 3));
-    s += `<text class="ax" x="${x(d)}" y="${CH - 6}" text-anchor="${i === 0 ? 'start' : i === 3 ? 'end' : 'middle'}">${esc(short(d))}</text>`;
-  }
-  const line = (pts, cls) => (pts.length > 1 ? `<path class="${cls}" d="${pts.map(([d, v], i) => `${i ? 'L' : 'M'}${x(d).toFixed(1)},${yv(v).toFixed(1)}`).join('')}"/>` : '');
-  const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5" data-tip="${esc(`${short(d)}: ${v.toFixed(1)} kg\nGoal line: ${goalAt(d).toFixed(1)} kg`)}"/>`).join('');
-  const last = trend.at(-1);
-  const keys = [['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend (14-day average)'], ['dash', 'Goal line'], ...(predOk ? [['sw-pred ln', `Expected from ${pred.weeks} fully logged ${pred.weeks === 1 ? 'week' : 'weeks'}`]] : [])];
-  const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, goal ${goalAt(today).toFixed(1)} today`) : '';
-  return chartBox('Weight', big, legend(keys), `${s}${line(goalPts, 'l-target')}${predOk ? line(pred.points, 'l-pred') : ''}${line(trend, 'l-weight')}${dots}`);
+  const vals = [...ins.map((x) => x[1]), ...goalPts.map((x) => x[1]), ...(predOk ? pred.points.map((x) => x[1]) : []), ...pace.map((x) => x[1])];
+  const { x, yv, s, line } = timeAxis(startD, endD, vals);
+  const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
+    + ins.map(([d, v]) => dotHit(x(d), yv(v), `${short(d)}: ${v.toFixed(1)} kg\nPlan line: ${goalAt(d).toFixed(1)} kg`)).join('');
+  const keys = [['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend'], ...(pace.length ? [['pace', 'At this pace']] : []), ['dash', 'Plan line'], ...(predOk ? [['pred', `Expected from ${pred.weeks} fully logged ${pred.weeks === 1 ? 'week' : 'weeks'}`]] : [])];
+  const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, plan line ${goalAt(today).toFixed(1)} today`) : '';
+  const g = L.goalFor(p);
+  const days = last ? L.etaDays(last, rate == null ? null : rate / 7, g, today) : null;
+  const note = days === 0 ? 'Goal reached.'
+    : rate == null ? 'The rate shows after 3 weigh-ins over 2 weeks.'
+    : days ? `At this pace you reach ${g.toFixed(1)} kg around ${esc(dateText(L.addDays(today, days), { day: 'numeric', month: 'short', year: 'numeric' }))}.`
+    : `At this pace there is no date for ${g.toFixed(1)} kg yet.`;
+  return `${chartBox('Weight', big, legend(keys), `${s}${line(goalPts, 'l-target')}${predOk ? line(pred.points, 'l-pred') : ''}${line(trend, 'l-weight')}${line(pace, 'l-pace')}${dots}`, 'Tap a weigh-in for its numbers.')}
+  ${foot(note)}`;
+}
+
+function vo2Chart() {
+  const p = state.profile;
+  const pts = L.vo2Readings(state).filter(([d]) => d >= L.addDays(p.startDate, -28));
+  if (pts.length < 2) return foot('VO2max shows here once the Steady Watch shortcut brings in 2 readings. If yours has no Cardio Fitness step, make it again from More, iPhone shortcuts.');
+  const [d0, v0] = pts[0], [d1, v1] = pts.at(-1);
+  const startD = [p.startDate, d0].sort()[0];
+  const endD = [todayISO(), d1].sort().at(-1);
+  const t = p.vo2Target;
+  const { x, yv, s, line } = timeAxis(startD, endD, [...pts.map((r) => r[1]), ...(t ? [t] : [])]);
+  const dots = pts.map(([d, v]) => `<circle class="d-effort" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
+    + pts.map(([d, v]) => dotHit(x(d), yv(v), `${short(d)}: ${v.toFixed(1)} mL/kg/min`)).join('');
+  const keys = [['sw-effort', 'Readings'], ['sw-effort ln', 'Trend'], ...(t ? [['dash', 'Your target']] : [])];
+  return `${chartBox('VO2max', bigNum(v1.toFixed(1), 'mL/kg/min', `on ${esc(short(d1))}`), legend(keys), `${s}${t ? line([[startD, t], [endD, t]], 'l-target') : ''}${line(L.smooth(pts), 'l-effort')}${dots}`, 'Tap a reading for its value.')}
+  ${foot(`${signedDec(v1 - v0)} mL/kg/min since ${esc(short(d0))}.`)}`;
+}
+
+function weightTiles(items) {
+  const p = state.profile;
+  const today = todayISO();
+  const now = L.weightTrend(state).filter(([d]) => d <= today).at(-1);
+  const rate = L.weightRate(state, today).kgPerWeek;
+  const ws = items.filter((m) => m.kg != null);
+  const next = ws.find((m) => !m.done);
+  const shown = next ?? ws.at(-1);
+  const n = next && now ? L.etaDays(now, rate == null ? null : rate / 7, next.kg, today) : null;
+  const kg = (v) => `${v} <span class="big-unit">kg</span>`;
+  const tile = (num, label, sub) => `<div class="tile-card"><span class="tile-num num">${num}</span><span class="tile-label">${label}</span><span class="tile-sub">${sub}</span></div>`;
+  return `<div class="tiles">
+    ${tile(kg(now ? signedDec(now[1] - p.startWeight) : '0.0'), 'Since start', now ? `From ${p.startWeight.toFixed(1)} kg` : 'No weigh-ins yet')}
+    ${tile(rate == null ? 'Not yet' : kg(signedDec(rate, 2)), 'Per week', rate == null ? 'After 3 weigh-ins over 2 weeks' : 'Over the last 4 weeks')}
+    ${tile(!next || n === 0 ? 'Reached' : rate == null ? 'Too early to tell' : n == null ? 'No date yet' : `About ${L.durationText(n)}`, 'Next milestone', shown ? `${shown.kg.toFixed(1)} kg${next && n ? ' at this pace' : ''}` : '')}
+    ${tile(L.weekStreak(state, today), 'Weeks in a row', 'At half the plan or more')}
+  </div>`;
+}
+
+function milestoneList(items) {
+  return `${sectionHead('Milestones', `${items.filter((m) => m.done).length} of ${items.length}`)}
+  <div class="group milestones">${items.map((m) => `<div class="cell"><span class="accessory${m.done ? ' done' : ''}">${m.done ? icon('check-circle') : '<span class="open-mark"></span>'}</span>
+    <div class="cell-main"><div class="cell-title">${esc(m.title)}</div><div class="cell-sub">${esc(m.done ? `Earned ${short(m.date)}` : m.detail)}</div></div></div>`).join('')}</div>`;
 }
 
 function maintenanceCard() {
@@ -868,9 +1044,18 @@ function maintenanceCard() {
   }
   const using = p.kcalTarget === m.suggested;
   return `<section class="card burn-card"><div class="chart-head"><h3>Your real burn</h3><p class="chart-big">${bigNum(fmt(m.maintenance), 'kcal', 'a day')}</p></div>
-    <p>Over the last ${plural(m.daysLogged, 'logged day', 'logged days')} you ate about ${fmt(m.intake)} kcal a day and your weight trend moved ${m.kgPerWeek >= 0 ? '+' : '−'}${Math.abs(m.kgPerWeek).toFixed(2)} kg a week${m.formula ? `. The formula and the Watch said ${fmt(m.formula)}` : ''}. To keep losing about 0.5 kg a week, the limit would be ${fmt(m.suggested)} kcal.</p>
+    <p>Over the last ${plural(m.daysLogged, 'logged day', 'logged days')} you ate about ${fmt(m.intake)} kcal a day and your weigh-ins moved ${m.kgPerWeek >= 0 ? '+' : '−'}${Math.abs(m.kgPerWeek).toFixed(2)} kg a week${m.formula ? `. The formula and the Watch said ${fmt(m.formula)}` : ''}. To keep losing about 0.5 kg a week, the limit would be ${fmt(m.suggested)} kcal.</p>
     <div class="btn-row">${using ? `<span class="accessory done">${icon('check-circle')} Using it</span>` : `<button class="btn btn-fill btn-sm" data-act="use-limit" data-n="${m.suggested}">Use ${fmt(m.suggested)} kcal</button>`}
     ${p.kcalTarget ? '<button class="btn btn-gray btn-sm" data-act="use-limit" data-n="0">Back to automatic</button>' : ''}</div></section>`;
+}
+
+// Finished days only, so a half-logged today never reads as short. Until 2 of them say something about effort, last week's show instead.
+function weekInsights(today) {
+  const monday = L.mondayOf(today);
+  const done = Array.from({ length: L.weekday(today) }, (_, i) => L.addDays(monday, i));
+  const last = done.filter((d) => L.effortKnown(state.days[d])).length < 2;
+  const lines = last ? L.insights(state, L.addDays(monday, -7), L.addDays(monday, -1)) : L.insights(state, monday, L.addDays(today, -1));
+  return lines.length ? callout('chart-line-up', `${last ? '<p><strong>Last week</strong></p>' : ''}<ul>${lines.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>`) : '';
 }
 
 function viewProgress() {
@@ -892,7 +1077,9 @@ function viewCharts() {
   const counts = L.weekCounts(state, monday);
   const any = Object.values(state.days).some((d) => d.foods?.length || d.water?.length || d.workouts?.length || d.watch || d.weight);
   const stat = (label, value) => `<div class="cell"><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value">${value}</span></div>`;
+  const ms = L.milestones(state, today);
   return `${sectionHead('This week')}
+  ${weekInsights(today)}
   <div class="group">
     ${stat('Sessions done', `${wk.done} of ${wk.planned}`)}
     ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`)}
@@ -913,7 +1100,10 @@ function viewCharts() {
   ${energyChart(dates)}
   ${waterChart(dates)}
   ${exerciseChart(mondays)}
+  ${weightTiles(ms)}
   ${weightChart()}
+  ${vo2Chart()}
+  ${milestoneList(ms)}
   ${sectionHead('Week by week')}
   <div class="card table-card"><div class="scroll-x"><table class="tbl"><thead><tr><th>Week of</th><th>Sessions</th><th>Ex min</th><th>Load</th><th>Steps</th><th>kcal</th><th>Protein</th><th>Water L</th><th>In minus out</th><th>Weight</th></tr></thead><tbody>
   ${mondays.slice().reverse().map((m) => {
@@ -942,7 +1132,11 @@ function viewHealth() {
   };
   const levelText = { normal: 'Normal.', elevated: 'Slightly above 120. Keep an eye on it.', raised: 'At or above 130/80 on average. Show this to your GP.', high: 'At or above 140/90 on average. See your GP soon.' };
   const firstW = waist[0], lastW = waist.at(-1);
-  return `${sectionHead('Blood tests')}
+  return `${sectionHead('For your doctor')}
+  ${segmented('report-days', [['28', '4 weeks'], ['91', '3 months'], ['182', '6 months'], ['start', 'All']], ui.reportDays, 'Period of the summary')}
+  <div class="group"><button class="cell cell-action" data-act="doctor-pdf">${icon('export')}<span>Share as PDF</span></button></div>
+  ${foot('The summary fits on one page: weight, blood pressure, blood tests, waist, training and food. Blood tests and the waist show the latest results, whatever the period. The file stays on this phone until you share it.')}
+  ${sectionHead('Blood tests')}
   <div class="group">
     <div class="cell"><span class="tile info">${icon('test-tube')}</span><div class="cell-main"><div class="cell-title">Next blood test</div><div class="cell-sub">${esc(dateText(lab))}${toLab >= 0 ? `, in ${plural(toLab, 'day', 'days')}` : ''}. Ask for fasting glucose, HbA1c, lipids and uric acid.</div></div></div>
     <label class="cell field"><span class="field-label">Change the date</span><input type="date" data-act="next-lab" value="${lab}"></label>
@@ -981,7 +1175,7 @@ function sheetLab() {
       <label class="cell field"><span class="field-label">Date</span><input type="date" name="date" value="${todayISO()}" required></label>
       ${LABS.map((l) => `<label class="cell field"><span class="field-label">${esc(l.name)}</span><input name="${l.key}" inputmode="decimal" autocomplete="off" placeholder="0"><span class="unit">${esc(l.unit)}</span></label>`).join('')}
       <label class="cell field"><span class="field-label">Note</span><input name="note" maxlength="120" autocomplete="off" placeholder="Optional"></label>
-    </div><button class="btn-start" type="submit">Save results</button></form></div>`;
+    </div>${formError('lab-error')}<button class="btn-start" type="submit">Save results</button></form></div>`;
 }
 
 // ---------- More, setup ----------
@@ -995,11 +1189,11 @@ function profileForm(p) {
       <label class="cell field"><span class="field-label">Sex</span><select name="sex"><option value="m" ${d.sex !== 'f' ? 'selected' : ''}>Male</option><option value="f" ${d.sex === 'f' ? 'selected' : ''}>Female</option></select></label>
       ${row('Age', 'age', 'years', 'inputmode="numeric" required placeholder="Required"')}
       ${row('Height', 'heightCm', 'cm', 'inputmode="decimal" required placeholder="Required"')}
-      ${row('Weight now', 'startWeight', 'kg', 'inputmode="decimal" required placeholder="Required"')}
+      ${row(p ? 'Start weight' : 'Weight now', 'startWeight', 'kg', 'inputmode="decimal" required placeholder="Required"')}
       ${row('Resting heart rate', 'rhr', 'bpm', 'inputmode="numeric" placeholder="From Health"')}
       <label class="cell field"><span class="field-label">Plan starts</span><input name="startDate" type="date" required value="${v('startDate')}"></label>
     </div>
-    ${foot('The plan always starts on a Monday. Resting heart rate is in the Health app under Heart.')}
+    ${foot(`${p ? 'Progress counts your milestones from the start weight, so log new weigh-ins on Today. ' : ''}The plan always starts on a Monday. Resting heart rate is in the Health app under Heart.`)}
     <details class="plain"><summary>${icon('caret-right')}Set your own targets</summary>
       ${foot(esc(auto))}
       <div class="group">
@@ -1007,6 +1201,8 @@ function profileForm(p) {
         ${row('Protein a day', 'proteinTarget', 'g', 'inputmode="numeric" placeholder="Automatic"')}
         ${row('Water base', 'waterBase', 'ml', 'inputmode="numeric" placeholder="2500"')}
         ${row('Max heart rate', 'maxHr', 'bpm', 'inputmode="numeric" placeholder="Automatic"')}
+        ${row('Goal weight', 'goalWeight', 'kg', 'inputmode="decimal" placeholder="Automatic"')}
+        ${row('VO2max target', 'vo2Target', 'mL/kg/min', 'inputmode="decimal" placeholder="Optional"')}
       </div>
     </details>
     <button class="btn-start" type="submit">${p ? 'Save' : 'Start the plan'}</button>
@@ -1015,6 +1211,8 @@ function profileForm(p) {
 
 function viewSetup() {
   const feature = (ic, kind, title, text) => `<div class="feature"><span class="tile ${kind} tile-lg">${icon(ic)}</span><div><h3>${title}</h3><p>${text}</p></div></div>`;
+  let unreadable = null;
+  try { unreadable = localStorage.getItem(`${KEY}.unreadable`); } catch { /* storage blocked */ }
   return `<div class="welcome">
     <img class="app-icon" src="icons/icon-192.png" alt="" width="84" height="84">
     <h1 class="nav-title">Steady</h1>
@@ -1025,6 +1223,7 @@ function viewSetup() {
       ${feature('lock-simple', 'water', 'Stays on this phone', 'It works offline, and nothing you enter leaves the phone unless you export it.')}
     </div>
   </div>
+  ${unreadable ? callout('warning', '<p><strong>Steady could not read the log on this phone.</strong> It kept a copy. Share the copy as a file to keep it safe before you start again, or import a backup at the bottom.</p><button class="btn btn-fill btn-sm" data-act="unreadable-share">Share the copy</button>', 'warn') : ''}
   ${sectionHead('About you')}
   ${profileForm(null)}
   <p class="center-foot">Moving phones? <label class="link">Import a backup<input type="file" accept=".json,application/json" data-act="import-backup" hidden></label></p>`;
@@ -1040,7 +1239,7 @@ function viewMore() {
   ${sectionHead('You and your targets')}
   ${profileForm(p)}
   ${sectionHead('Gym alerts')}
-  <div class="group"><label class="cell switch-cell"><span class="tile fuel">${icon('speaker-high')}</span><span class="cell-main"><span class="cell-title">Beep on silent</span><span class="cell-sub">This can pause your music</span></span><input type="checkbox" class="switch" data-act="setting" data-k="loudBeep" ${st.loudBeep ? 'checked' : ''}></label></div>
+  <div class="group"><label class="cell switch-cell"><span class="tile fuel">${icon('speaker-high')}</span><span class="cell-main"><span class="cell-title">Beep on silent</span><span class="cell-sub">This can pause your music</span></span><input type="checkbox" class="switch" switch data-act="setting" data-k="loudBeep" ${st.loudBeep ? 'checked' : ''}></label></div>
   ${foot(`The screen also flashes when rest ends and at each interval change, and it stays on during a session. ${esc(WATCH_ALERT)}`)}
   ${sectionHead('Hot months')}
   <div class="card months">${MONTHS.map((m, i) => `<label class="month"><input type="checkbox" data-act="hot-month" data-n="${i + 1}" ${(st.hotMonths || []).includes(i + 1) ? 'checked' : ''}><span>${m}</span></label>`).join('')}</div>
@@ -1048,7 +1247,7 @@ function viewMore() {
   ${sectionHead('Reminders')}
   <div class="group">${REMINDERS.map((r) => `<div class="cell switch-cell"><span class="cell-main"><span class="cell-title">${esc(r.label.split(',')[0])}</span><span class="cell-sub">${esc(r.label.split(', ').slice(1).join(', '))}</span></span>
     <input type="time" class="time" data-act="rem-time" data-id="${r.id}" value="${esc(rem[r.id]?.time || r.time)}" aria-label="Time for ${esc(r.label)}">
-    <input type="checkbox" class="switch" data-act="rem-on" data-id="${r.id}" ${rem[r.id]?.on === false ? '' : 'checked'} aria-label="${esc(r.label)}"></div>`).join('')}
+    <input type="checkbox" class="switch" switch data-act="rem-on" data-id="${r.id}" ${rem[r.id]?.on === false ? '' : 'checked'} aria-label="${esc(r.label)}"></div>`).join('')}
     ${action('ics', 'calendar-plus', 'effort', 'Add to Calendar')}
     ${action('ics-save', 'export', 'gray', 'Save the calendar file')}
   </div>
@@ -1060,20 +1259,24 @@ function viewMore() {
     ${fileRow('import-data', 'watch', 'effort', 'Import Watch or checkup file')}
     ${action('shortcut-help', 'clipboard-text', 'fuel', 'iPhone shortcuts')}
   </div>
-  ${foot(`Everything stays in this app's storage on this phone${ui.persisted ? ', and the phone has agreed to keep it' : ''}. The Watch and checkup files come from the Mac: run export_for_app.py there, AirDrop the file, then import it here. Days you typed in yourself keep your numbers.`)}
+  ${foot(`Everything stays in this app's storage on this phone${ui.persisted ? ', and the phone has agreed to keep it' : ''}. Watch numbers come in with the Steady Watch shortcut: run it, then tap Paste from Watch on Today. A Watch or checkup file from the Mac still imports here, and keeps the numbers you typed in.`)}
   ${sectionHead('How the numbers work')}
   <div class="card prose"><ul class="prose-list">
     <li>Calorie limit: resting energy (Mifflin-St Jeor) times 1.375, minus 550. It drops as your weight drops. After 4 weeks, Progress can replace it with your real burn.</li>
     <li>Protein: 1.3 g per kg of adjusted body weight. Fibre: 30 g.</li>
     <li>Water: the base plus 500 ml for every 30 exercise minutes, from the Watch or your logged sessions, whichever is higher.</li>
+    <li>Notes at the top of Progress: a training day has 30 or more exercise minutes or a logged session other than the post-meal walks. A day with no Watch minutes and no session counts as neither a training nor a rest day. Today is left out until it is over.</li>
     <li>Heart rate ranges: 30, 40, 60 and 80% of heart-rate reserve.</li>
+    <li>Weight trend: each weigh-in pulls it part of the way, about half when you weigh in once a week and more after a longer gap, so one heavy morning moves it less than the scale does. The rate per week is a straight line through the last 4 weeks of the trend.</li>
+    <li>Milestones: 5%, 8% and 10% below your start weight. The plan line on the weight chart reaches them at 12, 26 and 52 weeks. The goal is the last of them unless you set your own, and none goes under a BMI of 18.5.</li>
     <li>The plan holds a week when a week comes in under half, and every fourth week from week 16 is easier.</li>
     <li>Meal values are estimates for the portions in each recipe.</li>
   </ul></div>
   ${sectionHead('Stop and check')}
   <div class="card prose"><ul class="prose-list">${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>
+  <div class="group">${action('whats-new', 'sparkle', 'water', "What's new")}</div>
   <div class="group danger-group"><button class="cell cell-action danger" data-act="reset">${icon('trash')}<span>Delete all data</span></button></div>
-  ${foot('Icons by Phosphor Icons, MIT licence.')}`;
+  ${foot('Icons by Phosphor Icons, MIT licence. Exercise drawings from Workout Guide by Bryl Lim, some traced from Everkinetic, under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0), shown in black in light mode. Full credits for them are in img/ex/LICENSE.txt. Thai dish values from the Thai Food Composition Database (INMU, Mahidol University, 2025), the Thai Department of Health food tables (2008 and 2018) and a Bangkok delivery food study (IJERPH, 2023).')}`;
 }
 
 function sheetShortcuts() {
@@ -1082,16 +1285,21 @@ function sheetShortcuts() {
     ${sectionHead('Steady to Health', 'Steady into Health')}<div class="card prose"><ol class="steps">${SHORTCUT_OUT.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
     ${foot('Shortcuts menus differ a little between iOS versions. If a name does not match exactly, pick the closest one.')}</div>`;
 }
-function sheetPaste() {
+function sheetChanges() {
+  return `<div class="sheet">${sheetHead("What's new")}
+    <div class="card prose"><ul class="prose-list">${CHANGES.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div></div>`;
+}
+function sheetPaste(text = null) {
   return `<div class="sheet">${sheetHead('Paste Watch numbers')}
-    ${foot('The phone did not let Steady read the clipboard. Long-press the box, tap Paste, then Use these numbers.')}
-    <form data-form="paste"><div class="card"><textarea name="text" rows="5" aria-label="Pasted numbers"></textarea></div>
+    ${foot(text == null ? 'The phone did not let Steady read the clipboard. Long-press the box, tap Paste, then Use these numbers.' : 'Steady read this from the clipboard but could not use it. Run the Steady Watch shortcut again, or fix the text and tap Use these numbers.')}
+    <form data-form="paste"><div class="card"><textarea name="text" rows="5" aria-label="Pasted numbers" aria-describedby="paste-error">${esc(text ?? '')}</textarea></div>
+    <p class="section-foot form-error" id="paste-error" role="alert"></p>
     <button class="btn-start" type="submit">Use these numbers</button></form></div>`;
 }
-function sheetCopy(text) {
-  return `<div class="sheet">${sheetHead('Totals for Health')}
-    ${foot('The phone did not let Steady copy. Select the text, copy it, then run the Steady to Health shortcut.')}
-    <div class="card"><textarea rows="4" readonly aria-label="Totals">${esc(text)}</textarea></div></div>`;
+function sheetCopy(title, note, text) {
+  return `<div class="sheet">${sheetHead(title)}
+    ${foot(note)}
+    <div class="card"><textarea rows="4" readonly aria-label="${title}">${esc(text)}</textarea></div></div>`;
 }
 function sheetExport() {
   return `<div class="sheet">${sheetHead('Export a backup')}
@@ -1101,13 +1309,30 @@ function sheetExport() {
         <label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Passcode</span><input type="password" name="pass" autocomplete="new-password" placeholder="Optional"></label>
         <label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Again</span><input type="password" name="pass2" autocomplete="new-password" placeholder="Optional"></label>
       </div>
+      ${formError('export-error')}
       <button class="btn-start" type="submit">Export</button>
+    </form></div>`;
+}
+function sheetWeigh() {
+  const d = ui.date;
+  const last = L.weighIns(state).filter(([x]) => x <= d).at(-1);
+  return `<div class="sheet">${sheetHead('Weigh in')}
+    <form data-form="weigh">
+      <div class="card weigh">
+        <button type="button" class="btn btn-gray num" data-act="weigh-step" data-n="-0.1" aria-label="0.1 kg less">−0.1</button>
+        <label class="weigh-num"><input name="kg" inputmode="decimal" value="${(last?.[1] ?? state.profile.startWeight).toFixed(1)}" autocomplete="off" aria-label="Weight in kg" aria-describedby="weigh-error"><span class="big-unit">kg</span></label>
+        <button type="button" class="btn btn-gray num" data-act="weigh-step" data-n="0.1" aria-label="0.1 kg more">+0.1</button>
+      </div>
+      <p class="sr-only" id="weigh-said" aria-live="polite"></p>
+      ${formError('weigh-error')}
+      ${foot(`${esc(dateText(d))}. ${last ? `Last weigh-in ${esc(short(last[0]))}: ${last[1].toFixed(1)} kg.` : `Start: ${state.profile.startWeight.toFixed(1)} kg.`}${state.days[d]?.weight ? ' Clear the number and save to remove this weigh-in.' : ''}`)}
+      <button class="btn-start" type="submit">Save</button>
     </form></div>`;
 }
 function sheetUnlock() {
   return `<div class="sheet">${sheetHead('Open a protected backup')}
     <form data-form="unlock"><div class="group"><label class="cell field"><span class="tile gray">${icon('lock-simple')}</span><span class="field-label">Passcode</span><input type="password" name="pass" required autocomplete="current-password"></label></div>
-    <button class="btn-start" type="submit">Open</button></form></div>`;
+    ${formError('unlock-error')}<button class="btn-start" type="submit">Open</button></form></div>`;
 }
 
 // ---------- Sheet, tooltip, toast ----------
@@ -1137,7 +1362,8 @@ function closeSheet() {
     s.classList.remove('closing');
     s.close();
     s.innerHTML = '';
-    if (sheetReturn) document.querySelector(sheetReturn)?.focus({ preventScroll: true });
+    // What opened the sheet can be gone, as Finish is once the session is saved, so focus falls back to the page.
+    ((sheetReturn && document.querySelector(sheetReturn)) || $('#main')).focus({ preventScroll: true });
   };
   const timer = setTimeout(done, 500);
   s.addEventListener('transitionend', done);
@@ -1194,6 +1420,11 @@ function hideTip() {
 }
 let toastTimer = null;
 function toast(msg, undo = false) {
+  const err = !undo && $('#sheet[open]:not(.closing) .form-error'); // the open sheet covers the toast
+  if (err) {
+    err.textContent = msg;
+    return;
+  }
   const t = $('#toast');
   t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="btn btn-sm toast-undo" data-act="undo">Undo</button>' : ''}`;
   t.classList.toggle('has-btn', undo);
@@ -1214,7 +1445,8 @@ async function shareFile(name, type, text) {
       return true;
     }
   } catch (e) {
-    if (e.name === 'AbortError') return false;
+    // Closed, or a second tap while the share sheet was opening (only one share runs at a time): not a refusal.
+    if (e.name === 'AbortError' || e.name === 'InvalidStateError') return false;
   }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1227,13 +1459,18 @@ async function shareFile(name, type, text) {
 }
 
 // ---------- Actions ----------
+const startedAt = (a) => { const t = new Date(a.start); return `${short(L.iso(t))} at ${t.toTimeString().slice(0, 5)}`; };
 function finishSheet() {
   const s = currentSession();
-  const mins = Math.max(1, Math.round((Date.now() - state.active.start) / 60000));
+  // A session left running would put its whole clock in the box, past what Save accepts, so the plan's minutes go there.
+  const left = L.leftRunning(state.active, Date.now());
+  const mins = left ? s.minutes : Math.max(1, Math.round(L.activeMs(state.active, Date.now()) / 60000));
   const rpe = DEFAULT_RPE[s.effort] ?? 5;
-  return `<div class="sheet">${sheetHead(`Finish ${esc(s.name.toLowerCase())}`)}
+  return `<div class="sheet">${sheetHead(`Finish ${esc(s.name)}`)}
     <form data-form="finish">
-      <div class="group"><label class="cell field"><span class="tile effort">${icon('timer')}</span><span class="field-label">Minutes</span><input name="min" inputmode="numeric" value="${mins}" required autocomplete="off"><span class="unit">min</span></label></div>
+      <div class="group"><label class="cell field"><span class="tile effort">${icon('timer')}</span><span class="field-label">Minutes</span><input name="min" inputmode="numeric" value="${mins}" required autocomplete="off" aria-describedby="finish-error"><span class="unit">min</span></label></div>
+      ${left ? foot(`The timer has run since ${esc(startedAt(state.active))}, so this shows the planned ${s.minutes} minutes. Change it to how long you trained.`) : ''}
+      ${formError('finish-error')}
       ${sectionHead('How hard was it?', `target RPE ${esc(EFFORT[s.effort].rpe)}`)}
       <div class="rpe" role="group" aria-label="RPE">${Array.from({ length: 10 }, (_, i) => `<button type="button" class="num" data-act="rpe" data-n="${i + 1}" aria-pressed="${i + 1 === rpe}">${i + 1}</button>`).join('')}</div>
       <input type="hidden" name="rpe" value="${rpe}">
@@ -1244,6 +1481,18 @@ function finishSheet() {
       <button class="btn-start" type="submit">Save session</button>
       <button class="btn btn-plain danger btn-wide" type="button" data-act="discard">Discard session</button>
     </form></div>`;
+}
+function summarySheet(s, w, date) {
+  const planned = w.ex.reduce((t, e) => t + e.planned, 0);
+  const sets = w.ex.reduce((t, e) => t + e.sets, 0);
+  const up = L.heavierLifts(state, w.ex, date);
+  const next = L.nextSession(state, todayISO());
+  const row = (ic, label, value) => `<div class="cell"><span class="tile effort">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value num">${value}</span></div>`;
+  return `<div class="sheet">${sheetHead(`${esc(s.name)} saved`)}
+    <div class="group">${row('timer', 'Minutes', `${fmt(w.min)} min`)}${row('flame', 'Effort', `RPE ${w.rpe}`)}${planned ? row('list-checks', 'Sets done', `${sets} of ${planned}`) : ''}</div>
+    ${up.length ? `${sectionHead('Heavier than last time')}<div class="group">${up.map((x) => row('barbell', esc(EXERCISES[x.id]?.name ?? ''), `${x.was} to ${x.kg} kg`)).join('')}</div>` : ''}
+    ${next ? `${sectionHead('Next session')}<div class="group"><div class="cell"><span class="tile effort">${icon(sessionIcon(next.session))}</span><div class="cell-main"><div class="cell-title">${esc(next.session.name)}</div><div class="cell-sub">${esc(dateText(next.date))}, ${next.session.minutes} min</div></div></div></div>` : ''}
+    <button class="btn-start" data-act="sheet-close">Done</button></div>`;
 }
 
 function strengthLog(s, a) {
@@ -1264,21 +1513,17 @@ function foodFromMeal(m, slot, x = 1) {
   };
 }
 function applyPaste(text) {
+  // A toast is gone before these can be read, so they go in the paste sheet's alert line, opened on the clipboard text if need be.
+  const fail = (msg) => { if (!$('#sheet[open] #paste-error')) showSheet(sheetPaste(text)); $('#paste-error').textContent = msg; };
   try {
-    const r = L.parseWatchPaste(text, ui.date);
-    if (r.kind === 'file') {
-      snapshot();
-      const n = L.mergeWatch(state, r.data);
-      save(); closeSheet(); render();
-      return toast(`Added Watch numbers for ${plural(n, 'day', 'days')}`, true);
-    }
+    const data = L.parseWatchPaste(text, ui.date);
     snapshot();
-    const day = rw(r.date);
-    day.watch = { ...(day.watch ?? {}), ...r.watch, src: 'shortcut' };
+    const n = L.mergeWatch(state, data, 'shortcut', todayISO());
+    if (!n) return fail('Those numbers are out of range. Check the shortcut against the instructions in More, iPhone shortcuts.');
     save(); closeSheet(); render();
-    toast(`Watch numbers added for ${short(r.date)}`, true);
+    toast(`Added Watch numbers for ${plural(n, 'day', 'days')}`, true);
   } catch (e) {
-    toast(e.message);
+    fail(e.message);
   }
 }
 function pressSegment(el) {
@@ -1387,11 +1632,27 @@ const ACT = {
     render();
     toast(id ? `Swapped in ${L.MEAL_BY_ID[id].name}` : 'Back to the plan', true);
   },
-  'add-food-open': () => {
-    ui.addSlot = slotNow();
-    ui.portion = 1;
-    showSheet(sheetAddFood());
+  exclude: (el) => {
+    snapshot();
+    state.excluded = [...new Set([...(state.excluded || []), el.dataset.id])];
+    save();
+    closeSheet();
+    render();
+    toast('Not suggested any more', true);
   },
+  include: (el) => {
+    const at = [...document.querySelectorAll('#main [data-act="include"]')].indexOf(el);
+    snapshot();
+    state.excluded = (state.excluded || []).filter((id) => id !== el.dataset.id);
+    save();
+    render();
+    // The button goes with its row, so focus moves to the next Suggest again, or to the Menu chip once none is left.
+    const rest = document.querySelectorAll('#main [data-act="include"]');
+    (rest[at] ?? rest[at - 1] ?? $('#main [data-act="food-sec"][data-id="menu"]'))?.focus({ preventScroll: true });
+    toast('Suggested again', true);
+  },
+  'add-food-open': () => openAddFood(slotNow()),
+  'add-to': (el) => openAddFood(el.dataset.slot),
   'add-slot-seg': (el) => {
     ui.addSlot = el.dataset.id;
     pressSegment(el);
@@ -1438,11 +1699,13 @@ const ACT = {
     ui.session = { date: el.dataset.date || ui.date, id: el.dataset.id };
     ui.screen = 'session';
     ui.rest = null;
+    ui.hold = null;
     render(true);
   },
   'close-session': () => {
     ui.screen = ui.tab;
     ui.rest = null;
+    ui.hold = null;
     if (!state.active) wake(false);
     render(true);
   },
@@ -1459,11 +1722,15 @@ const ACT = {
     toast('Walk logged');
   },
   'quick-log': (el) => {
+    if (el.dataset.id) ui.session = { date: el.dataset.date, id: el.dataset.id };
     const s = currentSession();
+    snapshot();
     logWorkout(s.id, Number(el.dataset.n), DEFAULT_RPE[s.effort] ?? 5, null, '', strengthLog(s, null));
     save();
     render();
-    toast('Logged');
+    // The Log button on a Today row goes once the session is logged, so focus moves to the row, which stays.
+    if (el.dataset.id) $(`#main [data-act="open-session"][data-id="${el.dataset.id}"][data-date="${el.dataset.date}"]`)?.focus({ preventScroll: true });
+    toast('Logged', true);
   },
   set: (el) => {
     const i = Number(el.dataset.i), k = Number(el.dataset.k);
@@ -1472,24 +1739,61 @@ const ACT = {
       startActive();
     }
     unlockAudio();
-    const done = state.active.sets[i] ?? 0;
-    const next = k < done ? k : k + 1;
-    state.active.sets[i] = next;
-    save();
-    if (next > done) ui.rest = { until: Date.now() + currentSession().exercises[i][3] * 1000, beeped: false };
-    render();
+    const held = ui.hold?.i === i && ui.hold.k === k;
+    ui.hold = null;
+    // A timed set runs its hold first; a tap during the hold ticks it straight away.
+    if (!held && k >= (state.active.sets[i] ?? 0) && L.repSpec(currentSession().exercises[i][2]).unit === 's') return startHold(i, k);
+    tickSet(i, k);
+  },
+  'hold-done': () => {
+    const h = ui.hold;
+    ui.hold = null;
+    if (!h || !state.active) return;
+    tickSet(h.i, h.k);
+    focusSet(h.i, h.k); // the redraw replaced the Done button, so focus stays with the set just done
   },
   rest: (el) => {
     unlockAudio();
-    ui.rest = { until: Date.now() + Number(el.dataset.sec) * 1000, beeped: false };
-    tick();
+    const held = ui.hold;
+    ui.hold = null;
+    // A rest ends a pause of this session too, so it never counts down while the clock stands still.
+    const paused = isActive(ui.session.date, ui.session.id) && state.active.pausedAt;
+    if (paused) {
+      L.setPaused(state.active, false, Date.now());
+      save();
+    }
+    ui.rest = { until: Date.now() + Number(el.dataset.sec) * 1000, beeped: false, i: Number(el.dataset.i) };
+    if (held || paused) render();
+    else tick();
   },
   'rest-skip': () => {
     ui.rest = null;
-    $('#rest').hidden = true;
+    tick();
+  },
+  pause: () => {
+    const a = state.active;
+    L.setPaused(a, !a.pausedAt, Date.now());
+    // Nothing should count down or beep during a pause.
+    if (a.pausedAt) {
+      ui.rest = null;
+      ui.hold = null;
+    }
+    save();
+    render();
+  },
+  // Resume on Today means carry on, so it ends a pause as well as opening the session.
+  resume: (el) => {
+    L.setPaused(state.active, false, Date.now());
+    save();
+    ACT['open-session'](el);
   },
   'flash-hide': () => { $('#flash').hidden = true; },
-  finish: () => showSheet(finishSheet()),
+  finish: () => {
+    if (!state.active) return;
+    // Today's callout can finish the running session from any screen, so point the sheet at it.
+    ui.session = { date: state.active.date, id: state.active.id };
+    showSheet(finishSheet());
+  },
   rpe: (el) => {
     el.closest('form').elements.rpe.value = el.dataset.n;
     pressSegment(el);
@@ -1497,6 +1801,8 @@ const ACT = {
   discard: () => {
     if (!confirm('Discard this session without saving it?')) return;
     state.active = null;
+    ui.rest = null;
+    ui.hold = null;
     save();
     wake(false);
     closeSheet();
@@ -1549,6 +1855,15 @@ const ACT = {
     render();
     toast('Unticked', true);
   },
+  // share() runs straight from the tap, before anything async, because Safari only allows it during the gesture.
+  'shop-share': () => {
+    const monday = foodMonday();
+    const title = `Shopping for the week of ${short(monday)}`;
+    const text = L.shoppingText(state, monday, title);
+    const copy = () => showSheet(sheetCopy('Shopping list', 'The phone did not let Steady share. Select the text and copy it into Notes or Messages.', text));
+    if (!navigator.share) return copy();
+    navigator.share({ title, text }).catch((e) => { if (e.name !== 'AbortError' && e.name !== 'InvalidStateError') copy(); });
+  },
   range: (el) => { ui.range = Number(el.dataset.id); render(); },
   'use-limit': (el) => {
     snapshot();
@@ -1559,6 +1874,23 @@ const ACT = {
     toast(n ? `Limit set to ${fmt(n)} kcal` : 'Back to the automatic limit', true);
   },
   'lab-open': () => showSheet(sheetLab()),
+  'report-days': (el) => {
+    ui.reportDays = el.dataset.id;
+    pressSegment(el);
+  },
+  // Built inside the tap with nothing awaited first: iOS opens the share sheet only while the tap still counts.
+  'doctor-pdf': () => {
+    const today = todayISO();
+    const from = ui.reportDays === 'start' ? state.profile.startDate : L.addDays(today, 1 - Number(ui.reportDays));
+    shareFile(`steady-summary-${today}.pdf`, 'application/pdf', summaryPdf(L.doctorSummary(state, from, today), today));
+  },
+  'weigh-open': () => showSheet(sheetWeigh()),
+  'weigh-step': (el) => {
+    const input = el.closest('form').elements.kg;
+    const v = dec(input.value) ?? dec(input.defaultValue);
+    input.value = (Math.round((v + Number(el.dataset.n)) * 10) / 10).toFixed(1);
+    $('#weigh-said').textContent = `${input.value} kg`; // focus stays on the button, so the new number is read out from here
+  },
   'health-del': (el) => {
     snapshot();
     const { k, date, item } = el.dataset;
@@ -1581,10 +1913,11 @@ const ACT = {
       await navigator.clipboard.writeText(text);
       toast('Copied. Now run Steady to Health.');
     } catch {
-      showSheet(sheetCopy(text));
+      showSheet(sheetCopy('Totals for Health', 'The phone did not let Steady copy. Select the text, copy it, then run the Steady to Health shortcut.', text));
     }
   },
   'shortcut-help': () => showSheet(sheetShortcuts()),
+  'whats-new': () => showSheet(sheetChanges()),
   ics: () => {
     const cal = reminderFile();
     if (!cal) return;
@@ -1601,6 +1934,7 @@ const ACT = {
     if (cal) await shareFile('steady-reminders.ics', 'text/calendar', cal);
   },
   'export-open': () => showSheet(sheetExport()),
+  'unreadable-share': () => shareFile(`steady-unreadable-${todayISO()}.json`, 'application/json', localStorage.getItem(`${KEY}.unreadable`) ?? ''),
   'update-now': () => {
     ui.updating = true;
     swReg?.waiting?.postMessage('skip');
@@ -1608,6 +1942,7 @@ const ACT = {
   reset: () => {
     if (!confirm('Delete everything in Steady on this phone? Export a backup first if you might want it back.')) return;
     localStorage.removeItem(KEY);
+    localStorage.removeItem(`${KEY}.unreadable`);
     state = blank();
     ui.tab = 'today';
     render(true);
@@ -1641,15 +1976,6 @@ const CHANGE = {
   watch: (el) => {
     const day = rw(ui.date);
     day.watch = { ...(day.watch ?? {}), [el.dataset.k]: int(el.value), src: 'manual' };
-    save();
-    renderWhenIdle();
-  },
-  weight: (el) => {
-    const v = dec(el.value);
-    const day = rw(ui.date);
-    if (v == null) delete day.weight;
-    else if (v >= 30 && v <= 400) day.weight = Math.round(v * 10) / 10;
-    else return toast('Enter the weight in kg, like 82.5');
     save();
     renderWhenIdle();
   },
@@ -1704,6 +2030,7 @@ const SUBMIT = {
       sex: g('sex') === 'f' ? 'f' : 'm', age: int(g('age')), heightCm: dec(g('heightCm')), startWeight: dec(g('startWeight')),
       rhr: int(g('rhr')), startDate: g('startDate'), kcalTarget: int(g('kcalTarget')), proteinTarget: int(g('proteinTarget')),
       waterBase: int(g('waterBase')) || 2500, maxHr: int(g('maxHr')),
+      goalWeight: dec(g('goalWeight')), vo2Target: dec(g('vo2Target')),
     };
     const bad = (!p.age || p.age < 15 || p.age > 90) ? 'Enter your age in years.'
       : (!p.heightCm || p.heightCm < 120 || p.heightCm > 230) ? 'Enter your height in centimetres.'
@@ -1711,6 +2038,10 @@ const SUBMIT = {
       : (p.rhr != null && (p.rhr < 35 || p.rhr > 110)) ? 'Resting heart rate should be between 35 and 110.'
       : !/^\d{4}-\d{2}-\d{2}$/.test(p.startDate || '') ? 'Pick the date the plan starts.'
       : (p.kcalTarget != null && (p.kcalTarget < 1200 || p.kcalTarget > 5000)) ? 'A calorie limit under 1,200 or over 5,000 is not safe to use here.'
+      : (p.goalWeight != null && (p.goalWeight < 35 || p.goalWeight > 350)) ? 'Enter the goal weight in kg.'
+      : (p.goalWeight != null && p.goalWeight < L.minWeight(p.heightCm)) ? `For your height, a goal under ${(Math.ceil(L.minWeight(p.heightCm) * 10) / 10).toFixed(1)} kg is below a healthy weight.`
+      : (p.goalWeight != null && p.goalWeight >= p.startWeight) ? 'Set a goal weight below your start weight.'
+      : (p.vo2Target != null && (p.vo2Target < 10 || p.vo2Target > 90)) ? 'Enter a VO2max target between 10 and 90.'
       : null;
     if (bad) return toast(bad);
     p.startDate = L.mondayOf(p.startDate);
@@ -1718,15 +2049,14 @@ const SUBMIT = {
     if (state.profile && state.profile.startDate !== p.startDate) {
       state.repeats = [];
       state.skipHolds = [];
+      state.autoHolds = [];
       state.holdChecked = null;
     }
     state.profile = p;
+    if (first) state.seenVersion = APP_VERSION; // a new user has nothing to compare What's new with
     L.applyHolds(state, todayISO());
     save();
-    if (first) {
-      ui.screen = ui.tab = 'today';
-      navigator.storage?.persist?.().then((ok) => { ui.persisted = ok; });
-    }
+    if (first) ui.screen = ui.tab = 'today';
     render(true);
     toast(first ? 'Plan set up' : 'Saved');
   },
@@ -1751,16 +2081,22 @@ const SUBMIT = {
   },
   finish: (f) => {
     const min = int(f.elements.min.value);
-    if (!min || min > 600) return toast('Enter the minutes.');
+    if (!min || min > 600) return toast('Enter the minutes, up to 600.');
     const hr = int(f.elements.hr.value);
     const s = currentSession();
+    const { date } = ui.session;
     logWorkout(state.active.id, min, Number(f.elements.rpe.value), hr && hr >= 40 && hr <= 230 ? hr : null, f.elements.note.value.trim().slice(0, 200), strengthLog(s, state.active));
     state.active = null;
+    ui.rest = null;
+    ui.hold = null;
     save();
     wake(false);
-    closeSheet();
     render();
-    toast('Session saved');
+    showSheet(summarySheet(s, state.days[date].workouts.at(-1), date));
+    // The form that had focus is gone, so move focus to the new title, which also reads it out.
+    const title = $('#sheet-title');
+    title.tabIndex = -1;
+    title.focus();
   },
   lab: (f) => {
     const date = f.elements.date.value;
@@ -1775,6 +2111,19 @@ const SUBMIT = {
     closeSheet();
     render();
     toast('Results saved', true);
+  },
+  weigh: (f) => {
+    const v = dec(f.elements.kg.value);
+    if (v != null && (v < 30 || v > 400)) return toast('Enter the weight in kg, like 82.5');
+    if (v == null && !state.days[ui.date]?.weight) return closeSheet(); // nothing to save and nothing to remove
+    snapshot();
+    const day = rw(ui.date);
+    if (v == null) delete day.weight;
+    else day.weight = Math.round(v * 10) / 10;
+    save();
+    closeSheet();
+    render();
+    toast(v == null ? 'Weigh-in removed' : `Saved ${day.weight.toFixed(1)} kg`, true);
   },
   bp: (f) => {
     const sys = int(f.elements.sys.value), dia = int(f.elements.dia.value), pulse = int(f.elements.pulse.value);
@@ -1833,7 +2182,8 @@ function restoreBackup(data) {
   try {
     const clean = L.cleanBackup(data);
     if (!confirm('Replace everything in Steady with this backup?')) return;
-    state = { ...blank(), ...clean };
+    // An older backup must not bring back a What's new this phone has already shown.
+    state = { ...blank(), ...clean, seenVersion: Math.max(state.seenVersion || 0, clean.seenVersion) };
     save();
     ui.tab = ui.screen = 'today';
     render(true);
@@ -1893,7 +2243,8 @@ document.addEventListener('click', (e) => {
     return;
   }
   const el = e.target.closest?.('[data-act]');
-  if (!el || el.matches('input, select, textarea')) return;
+  // A tap on a .tap label comes back as a click on its hidden switch: that click runs the action, and iOS buzzes for it.
+  if (!el || el.matches('input, select, textarea') || e.target.matches('.tap')) return;
   const fn = ACT[el.dataset.act];
   if (fn) {
     e.preventDefault();
@@ -1914,7 +2265,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'food-q') $('#food-list').innerHTML = foodListItems(e.target.value);
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.matches?.('input[data-act="watch"], input[data-act="weight"], input[data-act^="ex-"]')) e.target.blur();
+  if (e.key === 'Enter' && e.target.matches?.('input[data-act="watch"], input[data-act^="ex-"]')) e.target.blur();
 });
 $('#sheet').addEventListener('pointerdown', dragSheet);
 // Escape slides it down as well. Without a recent tap the browser closes the dialog itself, and the event says so.
@@ -1927,7 +2278,7 @@ document.addEventListener('visibilitychange', () => {
   if (ui.onToday && ui.date !== todayISO() && ui.screen === 'today') {
     ui.date = todayISO();
     render();
-  }
+  } else if (state.active && ui.screen === 'today') renderWhenIdle(); // the running session's minutes have moved on
   if (state.active && ui.screen === 'session') wake(true);
 });
 window.addEventListener('scroll', hideTip, { passive: true });
@@ -1946,7 +2297,13 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     if (ui.updating) location.reload();
   });
 }
-navigator.storage?.persisted?.().then((ok) => { ui.persisted = ok; });
+// Ask on every launch until granted: WebKit decides by heuristics, grants it to Home Screen apps, and never prompts.
+navigator.storage?.persisted?.().then((ok) => ok || navigator.storage.persist?.()).then((ok) => { ui.persisted = !!ok; }).catch(() => {});
 if (state.profile && L.applyHolds(state, todayISO()).length) save();
 if (state.active) ui.session = { date: state.active.date, id: state.active.id };
 render(true);
+if (state.profile && state.seenVersion < APP_VERSION) {
+  state.seenVersion = APP_VERSION;
+  save();
+  showSheet(sheetChanges());
+}

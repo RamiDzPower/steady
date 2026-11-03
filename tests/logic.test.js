@@ -195,6 +195,32 @@ test('week summary, completion and automatic holds', () => {
   assert.deepEqual(L.applyHolds(skip, '2026-11-17'), []);
 });
 
+test('a hold the plan added lifts once a late paste brings last week to half, and a chosen repeat stays', () => {
+  // Watch minutes for week 1 came in up to Tuesday only when the app opened on the next Monday.
+  const st = fresh();
+  const watch = (d, exMin) => { st.days[d] = day({ watch: { exMin, src: 'shortcut' } }); };
+  watch('2026-11-09', 20);
+  watch('2026-11-10', 20);
+  assert.deepEqual(L.applyHolds(st, '2026-11-16'), ['2026-11-16']);
+  assert.equal(L.planPosition(profile.startDate, '2026-11-16', st.repeats).repeating, true);
+  // Partway there is still under half, so the hold stays.
+  L.mergeWatch(st, { kind: 'steady-watch', days: { '2026-11-11': { exMin: 5 } } }, 'shortcut', '2026-11-16');
+  assert.deepEqual([L.applyHolds(st, '2026-11-16'), st.repeats], [[], ['2026-11-16']]);
+  // The 7-day paste fills in the rest of the week: 20 + 20 + 5 + 4 x 20 is 125 of 100 minutes.
+  L.mergeWatch(st, { kind: 'steady-watch', days: Object.fromEntries(['2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15'].map((d) => [d, { exMin: 20 }])) }, 'shortcut', '2026-11-16');
+  assert.deepEqual(L.applyHolds(st, '2026-11-16'), []);
+  assert.deepEqual(st.repeats, []);
+  assert.equal(L.planPosition(profile.startDate, '2026-11-16', st.repeats).week, 2);
+  // A repeat chosen with Repeat this week is not the plan's to lift, however the week went.
+  const chosen = fresh();
+  for (let i = 0; i < 7; i++) chosen.days[L.addDays('2026-11-09', i)] = day({ watch: { exMin: 30 } });
+  chosen.repeats = ['2026-11-16'];
+  assert.deepEqual(L.applyHolds(chosen, '2026-11-17'), []);
+  assert.deepEqual(chosen.repeats, ['2026-11-16']);
+  // The plan's own holds survive a backup, so a restore can still lift them.
+  assert.deepEqual(L.cleanBackup({ ...st, autoHolds: ['2026-11-16', 'x'] }).autoHolds, ['2026-11-16']);
+});
+
 test('weekly counters for sugary drinks and purine-heavy foods', () => {
   const st = fresh();
   st.days['2026-11-10'] = day({ foods: [{ kcal: 250, p: 3, tags: ['sugary'] }, { kcal: 600, p: 35, tags: ['purine'] }, { kcal: 140, p: 0, tags: ['sugary'] }] });
@@ -216,7 +242,7 @@ test('weight trend, predicted weight and real maintenance', () => {
   assert.ok(last < 110 && last > 109, String(last));
   assert.deepEqual(L.goalPath(profile).map(([d]) => d), ['2026-11-09', '2027-02-01', '2027-05-10', '2027-11-08']);
   st.days['2026-11-16'] = day({ weight: 109 });
-  assert.deepEqual(L.weightTrend(st).map(([, v]) => v), [110, 109.5]);
+  assert.deepEqual(L.weightTrend(st).map(([, v]) => +v.toFixed(3)), [110, 109.478]);
 
   // Maintenance: 28 logged days at 2,300 kcal while losing 0.5 kg a week works out at about 2,850.
   const m = fresh();
@@ -265,17 +291,17 @@ test('health checks: lab status and blood pressure', () => {
 });
 
 test('Watch numbers pasted from a Shortcut', () => {
-  assert.equal(L.parseNum('8,123'), 8123);
-  assert.equal(L.parseNum('8.123'), 8123);
+  assert.equal(L.parseNum('8,123', true), 8123);
+  assert.equal(L.parseNum('8.123', true), 8123);
   assert.equal(L.parseNum('8 123'), 8123);
   assert.equal(L.parseNum('640.5'), 640.5);
   assert.equal(L.parseNum('1,196.4'), 1196.4);
   assert.equal(L.parseNum('640,5'), 640.5);
   const a = L.parseWatchPaste('{"steps":8123,"move":"640 kcal","exercise":"32 min"}', '2026-11-12');
-  assert.deepEqual(a, { kind: 'day', date: '2026-11-12', watch: { steps: 8123, moveKcal: 640, exMin: 32 } });
+  assert.deepEqual(a, { kind: 'steady-watch', days: { '2026-11-12': { steps: 8123, moveKcal: 640, exMin: 32 } } });
   const b = L.parseWatchPaste('date: 2026-11-10\nSteps: 9,876\nActive Energy: 701\nExercise Minutes: 41', '2026-11-12');
-  assert.deepEqual(b, { kind: 'day', date: '2026-11-10', watch: { steps: 9876, moveKcal: 701, exMin: 41 } });
-  assert.equal(L.parseWatchPaste('{"kind":"steady-watch","days":{}}', '2026-11-12').kind, 'file');
+  assert.deepEqual(b, { kind: 'steady-watch', days: { '2026-11-10': { steps: 9876, moveKcal: 701, exMin: 41 } } });
+  assert.equal(L.parseWatchPaste('{"kind":"steady-watch","days":{}}', '2026-11-12').kind, 'steady-watch');
   assert.throws(() => L.parseWatchPaste('hello', '2026-11-12'));
   const st = fresh();
   st.days['2026-11-12'] = day({ foods: [{ kcal: 2100, p: 140, fib: 31 }], water: [{ ml: 500 }, { ml: 750 }] });

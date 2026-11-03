@@ -1,8 +1,9 @@
 // Pure functions: dates, plan lookup, targets, daily and weekly numbers, menus, shopping, prep,
 // health checks, imports and backups. No DOM access here, so all of it runs under node --test.
-import { BLOCKS, SESSIONS, MEALS, MENUS, ITEMS, GROUPS, BATCHES, BATCH_ORDER, CHECKINS, REMINDERS, LABS } from './plan.js';
+import { BLOCKS, SESSIONS, MEALS, MENUS, ITEMS, GROUPS, PANTRY, BATCHES, BATCH_ORDER, CHECKINS, REMINDERS, LABS } from './plan.js';
 
-export const MEAL_BY_ID = Object.fromEntries(MEALS.map((m) => [m.id, m]));
+// No prototype, so stored ids like 'constructor' or 'toString' never pass as meals.
+export const MEAL_BY_ID = Object.assign(Object.create(null), Object.fromEntries(MEALS.map((m) => [m.id, m])));
 export const KCAL_PER_KG = 7700;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const sum = (a) => a.reduce((x, y) => x + y, 0);
@@ -181,12 +182,13 @@ export function balance(state, date) {
 }
 
 // ---- One week (Monday start) ----
-export function weekSummary(state, monday) {
+// n days from monday; the doctor summary uses it for a longer period.
+export function weekSummary(state, monday, n = 7) {
   const p = state.profile;
   const reps = state.repeats || [];
   const out = { monday, planned: 0, done: 0, strengthDone: 0, exMin: 0, load: 0, steps: [], kcal: [], protein: [], water: [], waterTarget: [], balance: [], weights: [] };
   const base = targets(p, weightOn(state, monday)).waterBase;
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < n; i++) {
     const date = addDays(monday, i);
     const day = state.days[date];
     const planned = sessionsFor(p.startDate, date, reps).filter((s) => s.kind !== 'rest');
@@ -229,11 +231,13 @@ export function weekCompletion(state, monday) {
 }
 
 // For each finished week below 50%, the next week repeats it. Returns the Mondays added.
+// Watch numbers or a session can reach last week after this week's hold was added, so a hold this added goes again once last week reaches half.
 export function applyHolds(state, today) {
   const p = state.profile;
   if (!p) return [];
   state.repeats ||= [];
   state.skipHolds ||= [];
+  state.autoHolds ||= [];
   const current = mondayOf(today);
   let w = state.holdChecked ? addDays(state.holdChecked, 7) : p.startDate;
   const added = [];
@@ -243,12 +247,14 @@ export function applyHolds(state, today) {
       const next = addDays(w, 7);
       if (c != null && c < 0.5 && !state.repeats.includes(next) && !state.skipHolds.includes(next)) {
         state.repeats.push(next);
+        state.autoHolds.push(next);
         added.push(next);
       }
     }
     state.holdChecked = w;
     w = addDays(w, 7);
   }
+  if (state.autoHolds.includes(current) && weekCompletion(state, addDays(current, -7)) >= 0.5) state.repeats = state.repeats.filter((r) => r !== current);
   state.repeats.sort();
   return added;
 }
@@ -264,22 +270,110 @@ export function weekCounts(state, monday) {
   return { sugary, purine };
 }
 
+// A day without Watch exercise minutes or a logged workout says nothing about effort, so a missing import is not a rest day.
+export const effortKnown = (day) => day?.watch?.exMin != null || !!day?.workouts?.length;
+const DAY_TOTALS = ['steps', 'moveKcal', 'exMin'];
+// A day with steps, Move or exercise minutes from the Watch, whether pasted, imported or typed in.
+const watched = (day) => DAY_TOTALS.some((k) => day?.watch?.[k] != null);
+// Up to 4 plain sentences on food and water against effort over from..to. A training day has 30 or more effort minutes
+// or a logged workout other than the post-meal walks, which the plan asks for on most days, so alone they would make
+// every weekday a training day. A sentence needs 2 days on each side it talks about; with less there is nothing to say.
+export function insights(state, from, to) {
+  const p = state.profile;
+  const base = targets(p, weightOn(state, from)).waterBase;
+  const train = [], rest = [], underProtein = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const day = state.days[d];
+    if (day?.foods?.length) underProtein.push(foodTotals(day).p < targets(p, weightOn(state, d)).protein);
+    if (effortKnown(day)) (effortMinutes(day) >= 30 || day.workouts?.some((w) => w.id !== 'walks') ? train : rest).push(day);
+  }
+  const of = (n, m, what) => `${n < m ? `${n} of ${m}` : m === 2 ? 'both' : `all ${m}`} ${what}`;
+  const than = (diff) => (diff > 0 ? 'training days than on rest days' : 'rest days than on training days');
+  const out = [];
+  const tw = train.filter((x) => x.water?.length), rw = rest.filter((x) => x.water?.length);
+  if (tw.length >= 2) {
+    const short = tw.filter((x) => waterTotal(x) < waterTarget(x, base)).length;
+    out.push(short ? `Water fell short on ${of(short, tw.length, 'training days')}.` : `You met the water target on ${of(tw.length, tw.length, 'training days')}.`);
+  }
+  // Gaps under a glass of water or 150 kcal are day-to-day noise, so they read as the same.
+  if (tw.length >= 2 && rw.length >= 2) {
+    const diff = mean(tw.map(waterTotal)) - mean(rw.map(waterTotal));
+    out.push(Math.abs(diff) < 250 ? 'You drank about the same on training and rest days.' : `You drank about ${(Math.round(Math.abs(diff) / 100) / 10).toFixed(1)} L more on ${than(diff)}.`);
+  }
+  const kcal = (a) => a.filter((x) => x.foods?.length).map((x) => foodTotals(x).kcal);
+  const tk = kcal(train), rk = kcal(rest);
+  if (tk.length >= 2 && rk.length >= 2) {
+    const diff = mean(tk) - mean(rk);
+    out.push(Math.abs(diff) < 150 ? 'You ate about the same on training and rest days.' : `You ate about ${(Math.round(Math.abs(diff) / 50) * 50).toLocaleString('en-GB')} kcal more on ${than(diff)}.`);
+  }
+  const m = underProtein.length, n = underProtein.filter(Boolean).length;
+  if (m >= 2) out.push(n ? `Protein was under the target on ${of(n, m, 'logged days')}.` : `You met the protein target on ${of(m, m, 'logged days')}.`);
+  return out;
+}
+
 // ---- Weight ----
 export function weighIns(state) {
   return Object.entries(state.days).filter(([, v]) => v.weight).map(([d, v]) => [d, v.weight]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
-// Average of the weigh-ins in the 14 days up to each weigh-in.
-export function weightTrend(state) {
-  const ins = weighIns(state);
-  return ins.map(([d]) => {
-    const win = ins.filter(([x]) => x <= d && x > addDays(d, -14)).map(([, v]) => v);
-    return [d, mean(win)];
-  });
+// Moving average over dated points: each reading pulls the line 1 - 0.9^days of the way towards it (10% a day).
+export function smooth(points) {
+  let prev = null;
+  return points.map(([d, v]) => (prev = [d, prev ? prev[1] + (1 - 0.9 ** diffDays(prev[0], d)) * (v - prev[1]) : v]));
 }
-// 5% at 12 weeks, 8% at 26 weeks, 10% at 52 weeks.
+export function weightTrend(state) {
+  return smooth(weighIns(state));
+}
+// Least-squares slope through [date, value] points, per day.
+function lineSlope(pts) {
+  const xs = pts.map(([d]) => diffDays(pts[0][0], d));
+  const ys = pts.map(([, v]) => v);
+  const mx = mean(xs), my = mean(ys);
+  return sum(xs.map((x, i) => (x - mx) * (ys[i] - my))) / sum(xs.map((x) => (x - mx) ** 2));
+}
+// Trend change a week over the last 28 days. Needs 3 weigh-ins at least 14 days apart end to end.
+export function weightRate(state, today) {
+  const from = addDays(today, -28);
+  const pts = weightTrend(state).filter(([d]) => d >= from && d <= today);
+  const span = pts.length > 1 ? diffDays(pts[0][0], pts.at(-1)[0]) : 0;
+  return { kgPerWeek: pts.length >= 3 && span >= 14 ? lineSlope(pts) * 7 : null, from, weighIns: pts.length };
+}
+// The weight at a BMI of 18.5, the bottom of the healthy range.
+export function minWeight(heightCm) {
+  return 18.5 * (heightCm / 100) ** 2;
+}
+// 5% at 12 weeks, 8% at 26 weeks, 10% at 52 weeks, never under a BMI of 18.5 or over the start weight.
 export function goalPath(profile) {
   const w = profile.startWeight;
-  return [[profile.startDate, w], [addDays(profile.startDate, 84), w * 0.95], [addDays(profile.startDate, 182), w * 0.92], [addDays(profile.startDate, 364), w * 0.9]];
+  const at = (f) => Math.min(w, Math.max(w * f, minWeight(profile.heightCm)));
+  return [[profile.startDate, w], [addDays(profile.startDate, 84), at(0.95)], [addDays(profile.startDate, 182), at(0.92)], [addDays(profile.startDate, 364), at(0.9)]];
+}
+// The goal set in More, or the last milestone, never under a BMI of 18.5.
+export function goalFor(profile) {
+  return Math.max(profile.goalWeight || goalPath(profile).at(-1)[1], minWeight(profile.heightCm));
+}
+// A weight in tenths of a kg, rounded as the screen shows it, so "reached" and "kg to go" agree with the numbers on show.
+const tenths = (kg) => Math.round(kg.toFixed(1) * 10);
+// Days from today to a target on the trend carried on at the rate: 0 once there, at least 1 until a weigh-in shows it, null if it falls 0.005 kg a day or slower.
+export function etaDays(last, kgPerDay, target, today) {
+  if (tenths(last[1]) <= tenths(target)) return 0;
+  if (kgPerDay == null || kgPerDay >= -0.005) return null;
+  const now = last[1] + kgPerDay * diffDays(last[0], today);
+  return Math.max(1, Math.ceil((now - target) / -kgPerDay - 1e-9));
+}
+// Days under 4 weeks, weeks under 12 weeks, then months.
+export function durationText(days) {
+  const [n, unit] = days < 28 ? [days, 'day'] : days < 84 ? [Math.round(days / 7), 'week'] : [Math.round(days / 30.44), 'month'];
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+// Mondays, or 7 days after the last weigh-in once the plan runs, until this week has a weigh-in.
+export function weighInDue(state, today) {
+  const last = weighIns(state).filter(([d]) => d <= today).at(-1)?.[0];
+  if (last && last >= mondayOf(today)) return false;
+  return weekday(today) === 0 || (today >= state.profile.startDate && (!last || diffDays(last, today) >= 7));
+}
+// VO2max from the Watch (mL/kg/min) on the days that have a reading.
+export function vo2Readings(state) {
+  return Object.entries(state.days).filter(([, v]) => v.watch?.vo2).map(([d, v]) => [d, v.watch.vo2]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 // Weight expected from the energy balance, one point per week from the first weigh-in on or after fromDate.
 // Only weeks with food logged on 6 or more days move the line; other weeks leave it flat.
@@ -325,10 +419,7 @@ export function maintenance(state, today) {
   if (from > to || n < 20 || ins.length < 3 || span < 14) {
     return { ready: false, daysLogged: n, weighIns: ins.length, needDays: Math.max(0, 20 - n), needWeighIns: Math.max(0, 3 - ins.length), from };
   }
-  const xs = ins.map(([d]) => diffDays(ins[0][0], d));
-  const ys = ins.map(([, v]) => v);
-  const mx = mean(xs), my = mean(ys);
-  const slope = sum(xs.map((x, i) => (x - mx) * (ys[i] - my))) / sum(xs.map((x) => (x - mx) ** 2));
+  const slope = lineSlope(ins);
   const avgIn = mean(intake);
   const maint = Math.round(avgIn - slope * KCAL_PER_KG);
   return {
@@ -337,29 +428,117 @@ export function maintenance(state, today) {
   };
 }
 
+// ---- Milestones ----
+// Each plan week so far, replayed a day at a time: the day it reached half and all of the plan, and its 5th day with food.
+function planWeeks(state, today) {
+  const out = [];
+  for (let m = mondayOf(state.profile.startDate); m <= today; m = addDays(m, 7)) {
+    const w = { half: null, full: null, food5: null, food: 0, share: 0 };
+    const days = {};
+    for (let i = 0; i < 7 && addDays(m, i) <= today; i++) {
+      const d = addDays(m, i);
+      if (!state.days[d]) continue;
+      days[d] = state.days[d];
+      if (days[d].foods?.length && ++w.food === 5) w.food5 = d;
+      w.share = weekCompletion({ ...state, days }, m) ?? 0;
+      if (w.share >= 0.5) w.half ||= d;
+      if (w.share >= 1) w.full ||= d;
+    }
+    out.push(w);
+  }
+  return out;
+}
+// Weeks in a row at half the plan, and the day each run length was first reached. This week can add to a run but not break it.
+function runs(weeks) {
+  let run = 0;
+  const first = {};
+  weeks.forEach((w, i) => {
+    if (w.half) {
+      run++;
+      first[run] ||= w.half;
+    } else if (i < weeks.length - 1) run = 0;
+  });
+  return { run, first };
+}
+export function weekStreak(state, today) {
+  return runs(planWeeks(state, today)).run;
+}
+// Weight milestones judged on the trend, then habits. A milestone not yet done says what is left in detail.
+export function milestones(state, today) {
+  const p = state.profile;
+  const weeks = planWeeks(state, today);
+  const { run, first } = runs(weeks);
+  const now = weeks.at(-1); // this week, once the plan has started
+  const trend = weightTrend(state).filter(([d]) => d <= today);
+  const kgNow = trend.at(-1)?.[1] ?? p.startWeight;
+  const days = Object.keys(state.days).filter((d) => d <= today).sort();
+  const firstKg = {};
+  let heavier = null;
+  for (const d of days) {
+    for (const e of (state.days[d].workouts ?? []).flatMap((w) => w.ex ?? [])) {
+      if (!e.kg || !e.sets) continue; // a weight typed in for an exercise then skipped was not lifted
+      firstKg[e.id] ??= e.kg;
+      if (e.kg > firstKg[e.id]) heavier ||= d;
+    }
+  }
+  const item = (id, title, date, detail, extra) => ({ id, title, detail: date ? '' : detail, done: !!date, date: date || null, ...extra });
+  // Milestones clamped to the same weight collapse into one.
+  const kgs = goalPath(p).slice(1).map(([, kg]) => kg).filter((kg, i, a) => kg < p.startWeight && kg !== a[i - 1]);
+  const later = 'Counts from the start of the plan';
+  const weeksLeft = (n) => `${n} more ${n === 1 ? 'week' : 'weeks'} at half the plan or more`;
+  return [
+    ...kgs.map((kg, i) => item(`weight-${i + 1}`, `${Math.round((1 - kg / p.startWeight) * 100)}% lighter: ${kg.toFixed(1)} kg`,
+      trend.find(([d, v]) => d >= p.startDate && tenths(v) <= tenths(kg))?.[0], `${((tenths(kgNow) - tenths(kg)) / 10).toFixed(1)} kg to go`, { kg })),
+    item('strength', 'First strength session', days.find((d) => state.days[d].workouts?.some((w) => SESSIONS[w.id]?.kind === 'strength')), '1 session to go'),
+    item('food', 'Food logged on 5 days in a week', weeks.find((w) => w.food5)?.food5, now ? `${now.food} of 5 days so far this week` : later),
+    item('full-week', 'A full week of the plan', weeks.find((w) => w.full)?.full, now ? `${Math.round(now.share * 100)}% of the plan so far this week` : later),
+    ...[4, 8, 12].map((n) => item(`weeks-${n}`, `${n} weeks in a row`, first[n], weeksLeft(n - run))),
+    item('heavier', 'First heavier lift', heavier, 'Lift more than your first time on any exercise'),
+  ];
+}
+
 // ---- Menus, swaps, shopping and prep ----
 export function menuIndex(startDate, date) {
   const w = Math.floor(diffDays(startDate, mondayOf(date)) / 7);
   return ((w % MENUS.length) + MENUS.length) % MENUS.length;
 }
-// The meals planned for a date as [{ key, slot, meal, swapped }], with any swaps for that date applied.
+// The meals planned for a date as [{ key, slot, meal, swapped, planned }]. An excluded meal gets a stand-in, and a swap to it is ignored but kept.
 export function menuFor(date, state) {
   const idx = state?.profile ? menuIndex(state.profile.startDate, date) : 0;
   const m = MENUS[idx][weekday(date)];
   const sw = state?.swaps?.[date] || {};
-  return [['breakfast', m.breakfast], ['lunch', m.lunch], ['dinner', m.dinner], ...m.snack.map((id, i) => [`snack${i}`, id])]
-    .map(([key, id]) => {
-      const use = sw[key] && MEAL_BY_ID[sw[key]] ? sw[key] : id;
-      return { key, slot: key.startsWith('snack') ? 'snack' : key, meal: MEAL_BY_ID[use], swapped: use !== id, planned: id };
-    });
+  const ex = state?.excluded || [];
+  const foods = state?.days?.[date]?.foods || [];
+  // A meal already logged in its slot keeps its row, so excluding it afterwards cannot open that slot for a second meal.
+  const out = (id, slot) => ex.includes(id) && !foods.some((f) => f.ref === id && f.slot === slot);
+  const rows = [['breakfast', m.breakfast], ['lunch', m.lunch], ['dinner', m.dinner], ...m.snack.map((id, i) => [`snack${i}`, id])];
+  const taken = new Set([...rows.map(([, id]) => id), ...Object.values(sw)]); // so a stand-in is not a meal swapped in elsewhere
+  return rows.map(([key, id]) => {
+    const slot = key.startsWith('snack') ? 'snack' : key;
+    const plan = out(id, slot) ? standIn(id, slot, ex, taken) : id;
+    taken.add(plan);
+    const use = sw[key] && MEAL_BY_ID[sw[key]] && !out(sw[key], slot) ? sw[key] : plan;
+    return { key, slot, meal: MEAL_BY_ID[use], swapped: use !== plan, planned: plan };
+  });
+}
+// The closest option in calories, preferring one not yet on the day, then the same kind (home, prep or out); with none left the meal stays.
+function standIn(id, slot, ex, taken) {
+  const m = MEAL_BY_ID[id];
+  const best = swapOptions(slot, ex)
+    .map((o) => [(taken.has(o.id) ? 2 : 0) + (o.where === m.where ? 0 : 1), Math.abs(o.kcal - m.kcal), o.id])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1])[0];
+  return best ? best[2] : id;
 }
 export function mealTotals(meals) {
   return meals.reduce((t, m) => ({ kcal: t.kcal + m.kcal, p: t.p + m.p, fib: t.fib + m.fib }), { kcal: 0, p: 0, fib: 0 });
 }
+// Food search keeps only letters, their marks (Thai vowels and tone marks) and digits, so 'saltgrilled' finds 'Salt-grilled fish'.
+const squash = (s) => s.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
+export const matches = (name, q) => squash(name).includes(squash(q));
 // Lunches and dinners swap with each other; breakfasts and snacks with their own kind.
-export function swapOptions(slot) {
-  if (slot === 'breakfast' || slot === 'snack') return MEALS.filter((m) => m.slot === slot);
-  return MEALS.filter((m) => m.slot === 'lunch' || m.slot === 'dinner');
+export function swapOptions(slot, excluded = []) {
+  const kinds = slot === 'breakfast' || slot === 'snack' ? [slot] : ['lunch', 'dinner'];
+  return MEALS.filter((m) => kinds.includes(m.slot) && !excluded.includes(m.id));
 }
 
 export function formatAmount(item, q) {
@@ -387,6 +566,19 @@ export function shoppingFor(state, monday) {
     id, name,
     items: Object.keys(ITEMS).filter((k) => tot[k] && ITEMS[k].group === id).map((k) => ({ key: k, name: ITEMS[k].name, amount: formatAmount(ITEMS[k], tot[k]) })),
   })).filter((g) => g.items.length);
+}
+
+// The week's list as plain text for Messages or Notes: what is still to buy by aisle, then the cupboard checks.
+export function shoppingText(state, monday, title) {
+  const ticks = state.shopping?.[monday] || {};
+  const lines = [title];
+  for (const g of shoppingFor(state, monday)) {
+    const left = g.items.filter((it) => !ticks[it.key]);
+    if (left.length) lines.push('', g.name, ...left.map((it) => `- ${it.name}: ${it.amount}`));
+  }
+  const cupboard = PANTRY.filter((_, i) => !ticks[`pantry:${i}`]);
+  if (cupboard.length) lines.push('', 'Check the cupboard', ...cupboard.map((x) => `- ${x}`));
+  return lines.join('\n');
 }
 
 // Two prep sessions per week: Sunday cooks for Monday to Wednesday, Wednesday for Thursday to Sunday.
@@ -440,6 +632,52 @@ export function strengthHint(last, spec) {
   return unit === 's' ? 'You hit every set last time. Add 5 seconds or try the harder version.' : 'You hit every set last time. Add 2 reps or try the harder version.';
 }
 
+// ---- The running session ----
+// Milliseconds the session has run, leaving out the time it spent paused.
+export function activeMs(a, now) {
+  return Math.max(0, (a.pausedAt ?? now) - a.start - (a.pausedMs || 0));
+}
+// A clock past 10 hours, or one still running since an earlier day, timed a session nobody finished, not the workout.
+// A pause stops the clock, so a session paused yesterday still knows its minutes.
+export function leftRunning(a, now) {
+  return activeMs(a, now) > 600 * 60000 || (!a.pausedAt && iso(new Date(a.start)) < iso(new Date(now)));
+}
+// Resuming adds the pause to the running total, so a pause survives the app being closed.
+export function setPaused(a, on, now) {
+  if (on && !a.pausedAt) a.pausedAt = now;
+  else if (!on && a.pausedAt) {
+    a.pausedMs = (a.pausedMs || 0) + now - a.pausedAt;
+    a.pausedAt = null;
+  }
+}
+// The next set to do: the first exercise from index `from` on that has sets left, wrapping round to the start.
+export function nextUp(exercises, sets, from = 0) {
+  for (let j = 0; j < exercises.length; j++) {
+    const i = (from + j) % exercises.length;
+    const done = sets?.[i] ?? 0;
+    if (done < exercises[i][1]) return { i, set: done + 1, of: exercises[i][1] };
+  }
+  return null;
+}
+// Lifts with at least one set done at more weight than the last log of that exercise before `date`.
+// A last log with no kg is left out: it can mean bodyweight, a loaded backpack or a weight nobody typed in.
+export function heavierLifts(state, ex, date) {
+  return ex.flatMap((e) => {
+    const last = lastStrength(state, e.id, date);
+    return e.kg && e.sets && last?.kg && e.kg > last.kg ? [{ id: e.id, kg: e.kg, was: last.kg }] : [];
+  });
+}
+// The first planned session on or after `from` that is not a rest day or the daily walks, and is not logged yet.
+export function nextSession(state, from) {
+  for (let i = 0; i < 14; i++) {
+    const date = addDays(from, i);
+    const s = sessionsFor(state.profile.startDate, date, state.repeats || [])
+      .find((x) => x.kind !== 'rest' && x.id !== 'walks' && !state.days[date]?.workouts?.some((w) => w.id === x.id));
+    if (s) return { date, session: s };
+  }
+  return null;
+}
+
 // ---- Health checks ----
 export function labStatus(key, v) {
   const lab = LABS.find((l) => l.key === key);
@@ -455,56 +693,152 @@ export function bpSummary(bp, today) {
   return { n: recent.length, sys, dia, level, crisis: recent.some((r) => r.sys >= 180 || r.dia >= 120) };
 }
 
+// The numbers for a one-page summary for a doctor, over from..to but not before the plan start. No names or identifiers.
+// Points are [date, value]. Blood tests take the last two results up to the end however old, as tests are months apart.
+export function doctorSummary(state, from, to) {
+  const p = state.profile;
+  if (from < p.startDate) from = p.startDate;
+  const days = Math.max(0, diffDays(from, to) + 1);
+  const wk = weekSummary(state, from, days);
+  const byDate = (a, b) => (a.date < b.date ? -1 : 1);
+  const avg = (a) => (a.length ? Math.round(mean(a)) : null);
+  // The trend holds its value between weigh-ins, so the one before the period is its value on the first day, and dated so.
+  const tr = weightTrend(state).filter(([d]) => d <= to);
+  const held = tr.filter(([d]) => d <= from).at(-1) ?? tr[0], end = tr.at(-1);
+  const start = held && [held[0] < from ? from : held[0], held[1]];
+  const ins = weighIns(state).filter(([d]) => d <= to);
+  const home = (state.bp ?? []).filter((r) => !r.clinic && r.date >= from && r.date <= to);
+  const waist = (state.waist ?? []).filter((w) => w.date <= to).sort(byDate);
+  const w0 = waist.filter((w) => w.date <= from).at(-1) ?? waist[0], w1 = waist.at(-1);
+  const fed = []; // the targets on each day with food logged, as the limit moves with weight
+  for (let d = from; d <= to; d = addDays(d, 1)) if (state.days[d]?.foods?.length) fed.push(targets(p, weightOn(state, d)));
+  // Exercise counts the days that say something about it: Watch numbers or a logged session, and every day of a week with
+  // sessions but no Watch numbers, as without the Watch a day with no session is a rest day. A day never pasted is not.
+  const weeks = {};
+  for (let d = from; d <= to; d = addDays(d, 1)) (weeks[mondayOf(d)] ||= []).push(state.days[d]);
+  const ex = Object.values(weeks).flatMap((w) => (w.some(watched) ? w.filter((x) => watched(x) || x?.workouts?.length) : w.some((x) => x?.workouts?.length) ? w : []));
+  return {
+    from, to, days,
+    weight: end ? {
+      start, end, change: end[0] > start[0] ? end[1] - start[1] : null, kgPerWeek: weightRate(state, to).kgPerWeek, last: ins.at(-1),
+      trend: [start, ...tr.filter(([d]) => d > held[0])], weighIns: ins.filter(([d]) => d >= from),
+    } : null,
+    bp: {
+      week: bpSummary(state.bp, to), n: home.length, sys: avg(home.map((r) => r.sys)), dia: avg(home.map((r) => r.dia)),
+      high: home.reduce((a, r) => (!a || r.sys > a.sys || (r.sys === a.sys && r.dia > a.dia) ? r : a), null),
+    },
+    labs: LABS.map((l) => {
+      const rows = (state.labs ?? []).filter((x) => x[l.key] != null && x.date <= to).sort(byDate);
+      const now = rows.at(-1), was = rows.at(-2);
+      return { name: l.name, unit: l.unit, target: l.target.split(' (')[0], latest: now ? [now.date, now[l.key]] : null, previous: was ? [was.date, was[l.key]] : null, status: now ? labStatus(l.key, now[l.key]) : null };
+    }),
+    waist: w1 ? { latest: [w1.date, w1.cm], since: w0.date, change: w1 !== w0 ? w1.cm - w0.cm : null } : null,
+    training: { done: wk.done, planned: wk.planned, exMinPerWeek: ex.length ? Math.round((sum(ex.map(effortMinutes)) * 7) / ex.length) : null, exDays: ex.length, stepsAvg: wk.stepsAvg },
+    food: { daysLogged: wk.daysLogged, kcal: wk.kcalAvg, protein: wk.proteinAvg, kcalTarget: avg(fed.map((t) => t.kcal)), proteinTarget: avg(fed.map((t) => t.protein)) },
+  };
+}
+
 // ---- Watch numbers pasted from an iPhone Shortcut ----
-// Accepts 8,123 and 8.123 and 8 123 as thousands, and 640.5 or 640,5 as decimals.
-export function parseNum(raw) {
-  let s = String(raw ?? '').replace(/[\s']/g, '');
-  if (!s) return null;
-  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) return Number(s.replace(/[.,]/g, ''));
-  const dot = s.lastIndexOf('.'), comma = s.lastIndexOf(',');
-  if (dot >= 0 && comma >= 0) {
-    const at = Math.max(dot, comma);
-    s = `${s.slice(0, at).replace(/[.,]/g, '')}.${s.slice(at + 1)}`;
-  } else {
-    s = s.replace(',', '.');
-  }
+// Shortcuts writes the phone's decimal mark and never groups thousands, so one mark is a decimal point (640.538 or
+// 640,538). With two different marks the last is the decimal point (1,196.4); one mark used twice groups thousands
+// (1.234.567), and so does a single mark before exactly three digits in a whole count like steps or Move (8,123).
+export function parseNum(raw, whole = false) {
+  let s = String(raw ?? '').replace(/[\s'\u2019]/g, '');
+  const marks = s.match(/[.,]/g) || [];
+  const at = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+  if (new Set(marks).size === 1 && (marks.length > 1 || (whole && s.length - at === 4))) s = s.replace(/[.,]/g, '');
+  else if (marks.length) s = `${s.slice(0, at).replace(/[.,]/g, '')}.${s.slice(at + 1)}`;
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 }
-const firstNum = (v) => (typeof v === 'number' ? v : typeof v === 'string' ? parseNum((v.match(/\d[\d.,\s']*/) || [''])[0].trim()) : null);
-const pastedDate = (v) => (typeof v === 'string' && DATE.test(v.trim().slice(0, 10)) ? v.trim().slice(0, 10) : null);
+// The first number in a value, without its label or unit ('Steps: 8,123', '640.5 kcal'). A plain space joins only
+// before exactly three digits, so '8 123' is one number and '640 kcal' stops at the unit. A whole count that reads
+// past its range had a decimal point after all (640.538 kcal when Round Number is left out), so it is read as one.
+function firstNum(v, key) {
+  if (typeof v === 'number') return v;
+  const m = typeof v === 'string' ? v.match(/\d(?:[\d.,'\u2019\u00a0\u202f]| (?=\d{3}(?!\d)))*/) : null;
+  if (!m) return null;
+  const n = parseNum(m[0], WHOLE.includes(key));
+  return n > WATCH_RANGE[key]?.[1] ? parseNum(m[0]) : n;
+}
+// yyyy-MM-dd with an optional ISO time. A year of 2400 or more is Buddhist (a Thai-region phone writes 2569 for 2026),
+// and a time with Z or an offset is moved to the phone's own time zone before the date is read.
+const STAMP = /\b(\d{4})-(\d\d)-(\d\d)(?:T(\d\d:\d\d(?::\d\d(?:\.\d+)?)?)(Z|[+-]\d\d:?\d\d)?)?/;
+const STAMPS = new RegExp(STAMP.source, 'g');
+function readDay(text, m = String(text).match(STAMP)) {
+  const [, y, mo, d, time, zone] = m || [];
+  const day = m && `${+y >= 2400 ? +y - 543 : y}-${mo}-${d}`;
+  const t = zone ? new Date(`${day}T${time}${zone.replace(/^([+-]\d\d)(\d\d)$/, '$1:$2')}`) : null;
+  if (!m || iso(parse(day)) !== day || (t && Number.isNaN(t.getTime()))) {
+    throw new Error(`Steady cannot read the date in "${String(text).trim().slice(0, 30)}". In the shortcut, set Date Format to Custom and the format string to yyyy-MM-dd.`);
+  }
+  return t ? iso(t) : day;
+}
+const FIELDS = [['vo2', /vo2|cardio/], ['steps', /step/], ['exMin', /exer|exmin/], ['rhr', /rhr|resting ?heart/], ['moveKcal', /move|active/]];
+const fieldOf = (s) => FIELDS.find(([, re]) => re.test(s.toLowerCase()))?.[0];
+const FIELD_NAME = { steps: 'Steps', moveKcal: 'Active Energy', exMin: 'Exercise Minutes', rhr: 'Resting Heart Rate', vo2: 'Cardio Fitness' };
+const WHOLE = ['steps', 'moveKcal', 'exMin']; // kept as whole numbers, so a Move of 1,234 typed into the paste box is 1234 kcal, not 1
+const WATCH_RANGE = { moveKcal: [0, 20000], exMin: [0, 1440], steps: [0, 200000], rhr: [20, 220], vo2: [5, 100] };
+const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+// Reads what the Steady Watch shortcut copies: a line naming the type (steps, move, exercise, vo2), then its dates
+// and its values in the same order, so a week pastes at once. Also takes one-day lines ('Steps: 8,123'), a JSON object
+// or array of days, and the Mac's steady-watch file. Returns a steady-watch document; mergeWatch checks the ranges.
 export function parseWatchPaste(text, fallbackDate) {
   const raw = String(text ?? '').trim();
   let data = null;
   try { data = JSON.parse(raw); } catch { data = null; }
-  if (data?.kind === 'steady-watch') return { kind: 'file', data };
-  const watch = {};
+  if (data?.kind === 'steady-watch') return data;
+  const parts = []; // { key, dates, nums, at }: one type, with its dates and values paired in order
   let date = null;
-  const put = (key, v) => {
-    const k = String(key).toLowerCase();
-    const n = firstNum(v);
-    if (n == null) return;
-    if (k.includes('step')) watch.steps = Math.round(n);
-    else if (k.includes('exer')) watch.exMin = Math.round(n);
-    else if (k.includes('move') || k.includes('active') || k.includes('energy')) watch.moveKcal = Math.round(n);
-    else if (k.includes('rest')) watch.rhr = Math.round(n);
-  };
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    for (const [k, v] of Object.entries(data)) {
-      if (/date/i.test(k)) date = pastedDate(v);
-      else put(k, v);
+  if (data && typeof data === 'object') {
+    for (const o of [data].flat()) {
+      if (!o || typeof o !== 'object') continue;
+      const dk = Object.keys(o).find((k) => /date/i.test(k));
+      const dates = [o[dk] ?? []].flat().filter((s) => s != null && s !== '').map((s) => readDay(s));
+      for (const [k, v] of Object.entries(o)) {
+        const key = k === dk ? null : fieldOf(k);
+        if (key) parts.push({ key, dates, nums: [v].flat().map((x) => firstNum(x, key)) });
+      }
     }
   } else {
-    for (const line of raw.split(/[\n;]+/)) {
-      const m = line.match(/^\s*([A-Za-z][A-Za-z ]*?)\s*[:=]\s*(.+)$/);
-      if (!m) continue;
-      if (/date/i.test(m[1])) date = pastedDate(m[2]);
-      else put(m[1], m[2]);
+    for (const line of raw.split(/[\r\n;]+/)) {
+      const found = [...line.matchAll(STAMPS)];
+      const rest = line.replace(STAMPS, ' ');
+      const word = /^\s*[a-z]/i.test(rest);
+      const key = word ? fieldOf(rest) : null;
+      if (word && !key && /\bdate\b/i.test(rest)) { if (/\d/.test(line)) date = readDay(line); continue; } // names the day of one-day lines; a blank one is skipped
+      // A type name starts a part, and a label or plain words end it. Words with digits (Nov 2, 2026) stay in it as values,
+      // so a date in the wrong format shows up as a count that does not match.
+      if (key || (word && (!/\d/.test(rest) || /[:=]/.test(rest)))) parts.push({ key, dates: [], nums: [], at: date });
+      const p = parts.at(-1);
+      if (!p) continue;
+      p.dates.push(...found.map((m) => readDay(m[0], m)));
+      const n = firstNum(rest.replace(/vo2/gi, ''), p.key);
+      if (n != null) p.nums.push(n);
     }
   }
-  if (!Object.keys(watch).length) throw new Error('No Watch numbers found in what was pasted. Run the Steady Watch shortcut first.');
-  return { kind: 'day', date: date || fallbackDate, watch };
+  const days = {};
+  for (const { key, dates, nums, at } of parts) {
+    if (!key) continue;
+    const pairs = dates.length === nums.length ? dates.map((d, i) => [d, nums[i]])
+      : !dates.length && nums.length === 1 ? [[at ?? date ?? fallbackDate, nums[0]]] : null;
+    if (!pairs) throw new Error(`${FIELD_NAME[key]} came with ${count(dates.length, 'date')} and ${count(nums.length, 'number')}. In the shortcut, check its Format Date and Round Number.`);
+    for (const [d, n] of pairs) {
+      if (!d || n == null || (!n && key !== 'exMin')) continue; // blank, or a zero meaning no samples that day
+      const v = key === 'vo2' ? Math.round(n * 10) / 10 : Math.round(n);
+      const [lo, hi] = WATCH_RANGE[key];
+      // A number no day can have would be dropped later without a word, while the paste still counted its day.
+      if (v < lo || v > hi) throw new Error(`${FIELD_NAME[key]} for ${d} came as ${v}, which is out of range. In the shortcut, check its Unit and Round Number.`);
+      const w = (days[d] ||= {});
+      w[key] = Math.max(w[key] ?? 0, v); // a day that comes twice keeps the larger
+    }
+  }
+  if (!Object.keys(days).length) throw new Error('No Watch numbers found in what was pasted. Run the Steady Watch shortcut first.');
+  // Grouped by day, the exercise search leaves out a day with no exercise, so a day the Watch counted steps or Move on had
+  // 0 minutes. Not the first day, though: a 7-day search can start partway through it, after that day's exercise.
+  if (parts.some((p) => p.key === 'exMin')) for (const d of Object.keys(days).sort().slice(1)) if (days[d].exMin == null && (days[d].steps || days[d].moveKcal)) days[d].exMin = 0;
+  return { kind: 'steady-watch', days };
 }
 
 // Daily totals for the Steady to Health shortcut.
@@ -596,7 +930,7 @@ const TIME = /^\d{2}:\d{2}$/;
 
 function cleanWatch(w) {
   if (!w || typeof w !== 'object') return null;
-  const c = { moveKcal: num(w.moveKcal, 0, 20000), exMin: num(w.exMin, 0, 1440), steps: num(w.steps, 0, 200000), rhr: num(w.rhr, 20, 220), vo2: num(w.vo2, 5, 100) };
+  const c = Object.fromEntries(Object.entries(WATCH_RANGE).map(([k, [lo, hi]]) => [k, num(w[k], lo, hi)]));
   return { ...c, src: ['manual', 'shortcut'].includes(w.src) ? w.src : 'import' };
 }
 function cleanLabs(a) {
@@ -607,8 +941,9 @@ function cleanLabs(a) {
     return out;
   });
 }
+// Readings are kept oldest first, so the cap drops the oldest ones.
 function cleanBp(a) {
-  return arr(a, 2000).filter((r) => r && DATE.test(r.date) && num(r.sys, 60, 260) && num(r.dia, 30, 160))
+  return (Array.isArray(a) ? a.slice(-2000) : []).filter((r) => r && DATE.test(r.date) && num(r.sys, 60, 260) && num(r.dia, 30, 160))
     .map((r) => ({ date: r.date, t: TIME.test(r.t) ? r.t : '', sys: r.sys, dia: r.dia, pulse: num(r.pulse, 30, 220), clinic: r.clinic === true }));
 }
 function cleanWaist(a) {
@@ -634,6 +969,7 @@ export function cleanBackup(data) {
     rhr: num(p.rhr, 30, 120), maxHr: num(p.maxHr, 100, 230), startDate: DATE.test(p.startDate) ? p.startDate : null,
     kcalTarget: num(p.kcalTarget, 800, 6000), proteinTarget: num(p.proteinTarget, 20, 400), waterBase: num(p.waterBase, 500, 6000),
     nextLab: DATE.test(p.nextLab) ? p.nextLab : null,
+    goalWeight: num(p.goalWeight, 30, 400), vo2Target: num(p.vo2Target, 5, 100),
   } : null;
   if (profile && (!profile.age || !profile.heightCm || !profile.startWeight || !profile.startDate)) throw new Error('The backup profile is incomplete.');
   const days = {};
@@ -664,28 +1000,36 @@ export function cleanBackup(data) {
     if (!DATE.test(d) || !s || typeof s !== 'object') continue;
     for (const [k, id] of Object.entries(s)) if (/^(breakfast|lunch|dinner|snack\d)$/.test(k) && MEAL_BY_ID[id]) (swaps[d] ||= {})[k] = id;
   }
+  const excluded = [...new Set(arr(data.excluded, 100).filter((id) => typeof id === 'string' && MEAL_BY_ID[id]))];
   return {
-    v: 1, profile, days, custom, shopping, swaps,
-    repeats: dates(data.repeats), skipHolds: dates(data.skipHolds), holdChecked: DATE.test(data.holdChecked) ? data.holdChecked : null,
+    v: 1, profile, days, custom, shopping, swaps, excluded,
+    repeats: dates(data.repeats), skipHolds: dates(data.skipHolds), autoHolds: dates(data.autoHolds), holdChecked: DATE.test(data.holdChecked) ? data.holdChecked : null,
     labs: cleanLabs(data.labs), bp: cleanBp(data.bp), waist: cleanWaist(data.waist), settings: cleanSettings(data.settings),
-    lastBackup: DATE.test(data.lastBackup) ? data.lastBackup : null,
+    lastBackup: DATE.test(data.lastBackup) ? data.lastBackup : null, seenVersion: num(data.seenVersion, 0, 1000) ?? 0,
   };
 }
 
-// Merges the daily file made by export_for_app.py or a Shortcut paste. Values typed in by hand win.
-export function mergeWatch(state, data, src = 'import') {
+// Merges the daily file made by export_for_app.py or a Shortcut paste. Values typed in by hand win over a file.
+// A paste replaces the steps, Move and exercise minutes of a finished day, as a later run's total is the whole day.
+// It only raises the ones that can be a part-day reading: today's, the first day of each type in the paste, which a
+// 7-day search can start partway through, and typed ones.
+const WATCH_KEYS = ['moveKcal', 'exMin', 'steps', 'rhr', 'vo2'];
+export function mergeWatch(state, data, src = 'import', today) {
   if (!data || data.kind !== 'steady-watch' || typeof data.days !== 'object' || data.days === null) throw new Error('This file is not a Watch export for Steady.');
+  const first = Object.fromEntries(DAY_TOTALS.map((k) => [k, Object.keys(data.days).filter((d) => data.days[d]?.[k] != null).sort()[0]]));
   let n = 0;
   for (const [d, w] of Object.entries(data.days)) {
     if (!DATE.test(d)) continue;
     const incoming = cleanWatch({ ...w, src });
-    if (!incoming) continue;
+    if (WATCH_KEYS.every((k) => incoming[k] == null)) continue;
     const day = (state.days[d] ||= emptyDay());
     const own = day.watch;
-    if (own?.src === 'manual') {
-      for (const k of ['moveKcal', 'exMin', 'steps', 'rhr', 'vo2']) if (own[k] == null) own[k] = incoming[k];
+    if (src === 'shortcut') for (const k of DAY_TOTALS) if (own?.[k] != null && incoming[k] != null && (d >= today || d === first[k] || own.src === 'manual')) incoming[k] = Math.max(own[k], incoming[k]);
+    if (own?.src === 'manual' && src !== 'shortcut') {
+      for (const k of WATCH_KEYS) if (own[k] == null) own[k] = incoming[k];
     } else {
       day.watch = { ...(own ?? {}), ...Object.fromEntries(Object.entries(incoming).filter(([, v]) => v != null)) };
+      if (own?.src === 'manual') day.watch.src = 'manual'; // a paste leaves a typed day typed, so a Mac file still fills only its blanks
     }
     n++;
   }

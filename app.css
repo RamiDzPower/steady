@@ -15,7 +15,7 @@
   --inverse: #ffffff;
   --fuel: #eb6834;
   --water: #2a78d6;
-  --effort: #1baf7a;
+  --effort: #199e70; /* 3.4:1 on a white card, as data marks need 3:1 */
   --fuel-ink: #b4461a;
   --water-ink: #1c5cab;
   --effort-ink: #0f7a54;
@@ -77,6 +77,8 @@
 
 /* Text follows the iPhone text-size setting: 1rem is the system body size (17 pt by default). */
 html { font-size: 106.25%; -webkit-text-size-adjust: 100%; }
+/* Anything scrolled into view (keyboard focus, for one) stops clear of the blurred title bar and the floating tab bar. */
+html { scroll-padding: calc(52px + env(safe-area-inset-top)) 0 calc(112px + env(safe-area-inset-bottom)); }
 @supports (font: -apple-system-body) {
   html { font: -apple-system-body; }
 }
@@ -98,6 +100,7 @@ p { margin: 0; text-wrap: pretty; }
 ul, ol { margin: 0; }
 strong { font-weight: 600; }
 [hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .num { font-family: var(--font-round); font-variant-numeric: tabular-nums; }
 .dim { color: var(--label-2); }
 .i { display: block; width: 20px; height: 20px; fill: currentColor; flex: none; }
@@ -177,7 +180,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .mb-effort { fill: var(--effort); }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 4px; }
 .tile-card { display: grid; align-content: start; gap: 2px; background: var(--cell); border-radius: var(--r-card); padding: 14px 16px; }
-.tile-num { font-size: 1.65rem; font-weight: 700; line-height: 1.15; }
+.tile-num { font-size: 1.65rem; font-weight: 700; line-height: 1.15; text-wrap: balance; }
 .tile-label { font-size: 0.82rem; font-weight: 600; line-height: 1.25; }
 .tile-sub { font-size: 0.76rem; color: var(--label-2); }
 .tile { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: #fff; background: var(--gray-tile); }
@@ -193,15 +196,25 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .callout .tile { margin-top: 1px; }
 .callout-body { flex: 1; min-width: 0; display: grid; gap: 10px; justify-items: start; }
 .callout-body p { font-size: 0.94rem; line-height: 1.36; }
+.callout-body .btn-row { margin-top: 0; }
+.callout-body ul { padding-left: 18px; font-size: 0.94rem; line-height: 1.36; }
+.callout-body li + li { margin-top: 4px; }
 
 /* ---- Sections and inset grouped lists ---- */
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 4px 10px; }
 .section-head h2 { margin: 0; font-size: 1.3rem; line-height: 1.25; letter-spacing: -0.015em; }
 .section-meta { font-size: 0.82rem; color: var(--label-2); text-align: right; font-variant-numeric: tabular-nums; }
 .group-label { margin: 18px 16px 6px; font-size: 0.76rem; font-weight: 600; color: var(--label-2); }
+/* A list label with its own action, like the plus on each meal: a smaller circle, still a 44 px target, raised so the first row below cannot cover it. */
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 16px 2px; }
+.group-head .group-label { margin: 0; }
+.group-head .icon-btn { width: 28px; height: 28px; z-index: 1; }
+.group-head .icon-btn::after { inset: -8px; }
 .section-foot { margin: 8px 16px 0; font-size: 0.76rem; line-height: 1.38; color: var(--label-2); }
 .lede { margin: 0 4px 12px; font-size: 1rem; line-height: 1.38; }
 .group { --inset: 16px; background: var(--cell); border-radius: var(--r-group); overflow: hidden; margin: 0 0 4px; }
+/* The group clips whatever crosses its edge, so a focused row draws its ring inside itself. */
+.group .cell:focus-visible { outline-offset: -3px; }
 .group:has(.tile), .group:has(.date-badge) { --inset: 58px; }
 .week-list { --inset: 72px !important; }
 .cell {
@@ -225,6 +238,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .accessory.done { color: var(--effort); }
 .accessory.done .i { width: 22px; height: 22px; }
 span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.88rem; }
+.burn-card .accessory.done { color: var(--effort-ink); } /* its Using it is text, which needs 4.5:1 */
 .as-link { appearance: none; border: 0; background: none; padding: 0; margin: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .cell-main.as-link { display: grid; gap: 2px; }
 .cell-button, .cell-action { cursor: pointer; transition: background-color 0.15s ease; }
@@ -249,7 +263,9 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 .btn .i { width: 16px; height: 16px; }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.4; cursor: default; transform: none; }
-.btn-sm { min-height: 34px; padding: 0 14px; font-size: 0.88rem; }
+.btn-sm { position: relative; min-height: 34px; padding: 0 14px; font-size: 0.88rem; }
+/* A small pill still takes a 44 px tall tap. */
+.btn-sm::after { content: ""; position: absolute; inset: -5px 0; }
 .btn-fill { background: var(--label); color: var(--inverse); }
 .btn-gray { background: var(--fill); color: var(--label); }
 .btn-plain { background: none; }
@@ -280,11 +296,14 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 .btn-start:active { transform: scale(0.97); }
 .start-row { display: grid; gap: 8px; margin: 16px 0 4px; }
 .start-row .btn-start { margin: 0; }
-.segmented { display: flex; gap: 2px; padding: 2px; margin: 0 0 14px; border-radius: 10px; background: var(--fill); }
+/* Segments that do not fit side by side, with large text on a narrow phone, go on to a second row. */
+.segmented { display: flex; flex-wrap: wrap; gap: 6px 2px; padding: 2px; margin: 0 0 14px; border-radius: 10px; background: var(--fill); }
 .segmented button {
-  flex: 1; appearance: none; border: 0; background: none; min-height: 32px; padding: 0 6px;
+  flex: 1; position: relative; appearance: none; border: 0; background: none; min-height: 32px; padding: 0 6px;
   border-radius: 8px; font-size: 0.82rem; font-weight: 600; color: var(--label); cursor: pointer; white-space: nowrap;
 }
+/* A 44 px tall tap; the 6 px between rows keeps a second row's from covering the first. */
+.segmented button::after { content: ""; position: absolute; inset: -6px 0; }
 .segmented button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 3px 8px rgb(0 0 0 / 0.12), 0 3px 1px rgb(0 0 0 / 0.04); }
 .chips { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; margin: 0 -16px 12px; padding: 2px 16px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
@@ -335,10 +354,11 @@ input.time {
 .check-cell:has(.round-check:checked) .cell-title { color: var(--label-2); text-decoration: line-through; text-decoration-color: var(--label-3); }
 
 /* ---- Form rows ---- */
-.field { cursor: text; }
+/* A row with no room for its label, five digits and its unit puts the unit under the box rather than squeezing the box away. */
+.field { cursor: text; flex-wrap: wrap; row-gap: 4px; }
 .field-label { flex: none; font-size: 1rem; }
 .field input, .field select {
-  flex: 1; min-width: 0; width: 100%; padding: 6px 0; margin: 0; border: 0; background: none; outline: none;
+  flex: 1; min-width: 3em; width: 100%; padding: 6px 0; margin: 0; border: 0; background: none; outline: none;
   text-align: right; color: var(--label); font: inherit; font-size: max(1rem, 16px);
 }
 .field input::placeholder { color: var(--label-3); }
@@ -346,6 +366,7 @@ input.time {
 .field input[type="date"] { text-align: right; color: var(--label-2); }
 .field:focus-within { background: var(--cell-2); }
 .unit { flex: none; font-size: 0.94rem; color: var(--label-2); }
+.field .unit { margin-left: auto; }
 .search { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; margin: 4px 0 12px; border-radius: 12px; background: var(--fill); color: var(--label-2); }
 .search .i { width: 16px; height: 16px; }
 .search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--label); font: inherit; font-size: max(1rem, 16px); }
@@ -362,6 +383,20 @@ details.plain[open] summary .i { transform: rotate(90deg); }
 .water-btns { display: flex; align-items: center; gap: 8px; }
 .water-btns .btn { flex: 1; padding: 0 8px; white-space: nowrap; }
 .water-btns .icon-btn { width: 44px; height: 44px; }
+.weigh { display: flex; align-items: center; gap: 8px; padding: 20px 12px; }
+.weigh .btn { padding: 0 12px; }
+/* The number shrinks with the room the buttons leave, so a narrow phone or a large text size never cuts off its decimal. */
+.weigh-num { flex: 1; min-width: 0; container-type: inline-size; display: flex; align-items: baseline; justify-content: center; gap: 4px; cursor: text; }
+/* It stops at 16 px, below which iOS zooms in on the box, so with large text on a narrow phone the steps go under it. */
+form[data-form="weigh"] { container-type: inline-size; }
+@container (width < 10em) {
+  .weigh { flex-wrap: wrap; justify-content: space-between; row-gap: 16px; }
+  .weigh-num { order: -1; flex-basis: 100%; }
+}
+.weigh-num input {
+  flex: none; width: 4.6ch; padding: 0; border: 0; background: none;
+  color: var(--label); text-align: right; font: 700 max(16px, min(2.6rem, 24cqi)) var(--font-round); font-variant-numeric: tabular-nums;
+}
 
 /* ---- Train and sessions ---- */
 .meters { display: grid; gap: 16px; }
@@ -401,12 +436,20 @@ details.plain[open] summary .i { transform: rotate(90deg); }
 .rest-label { font-size: 0.76rem; font-weight: 600; color: var(--label-2); }
 .rest-time { font-size: 2rem; font-weight: 600; letter-spacing: -0.02em; font-family: var(--font-round); font-variant-numeric: tabular-nums; }
 .rest.go .rest-time { color: var(--fuel-ink); }
+.rest.done .rest-time { font-size: 1.06rem; letter-spacing: 0; }
+.rest-next { margin-top: 2px; font-size: 0.82rem; color: var(--label-2); }
+/* Room below the last card, so the bar never sits over its set buttons. */
+body:has(.rest:not([hidden])) { padding-bottom: calc(200px + env(safe-area-inset-bottom)); }
+.timer-card.paused .timer { color: var(--label-2); }
 .exlist { display: grid; gap: 12px; margin-top: 16px; }
 .ex { margin: 0; }
 .ex-head { display: flex; align-items: flex-start; gap: 12px; }
 .ex-num { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--fill); font-size: 0.88rem; font-weight: 700; }
 .ex-name { margin: 0; font-size: 1.06rem; font-weight: 600; line-height: 1.25; }
 .ex-meta { margin-top: 2px; font-size: 0.82rem; color: var(--label-2); }
+/* The drawings are white line art on a transparent canvas: black in light mode, as they come in dark mode. */
+.ex-pic { display: block; width: 100%; max-width: 160px; height: auto; margin: 12px auto 0; filter: brightness(0); pointer-events: none; }
+@media (prefers-color-scheme: dark) { .ex-pic { filter: none; } }
 .cue { margin: 12px 0 4px; font-size: 0.94rem; line-height: 1.38; }
 .ex-alt { font-size: 0.82rem; color: var(--label-2); }
 .ex-last { margin-top: 8px; font-size: 0.82rem; font-weight: 500; line-height: 1.35; color: var(--effort-ink); }
@@ -416,10 +459,13 @@ details.plain[open] summary .i { transform: rotate(90deg); }
 .pill-field input { flex: 1; min-width: 0; border: 0; background: none; outline: none; text-align: right; color: var(--label); font: 600 max(1.06rem, 16px) var(--font-round); }
 .sets { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .setbtn {
-  appearance: none; border: 0; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
+  appearance: none; border: 0; position: relative; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
   background: var(--fill); color: var(--label); font-size: 1.06rem; font-weight: 700; cursor: pointer;
   transition: transform 0.15s var(--ease), background-color 0.2s ease;
 }
+/* iOS only buzzes for a real tap on a switch, so a label over each set button takes the tap and passes it to a hidden one. */
+.tap { position: absolute; inset: 0; border-radius: inherit; }
+.tap input { position: absolute; width: 1px; height: 1px; margin: 0; visibility: hidden; }
 .setbtn .i { width: 20px; height: 20px; }
 .setbtn:active { transform: scale(0.92); }
 .setbtn[aria-pressed="true"] { background: var(--effort-tile); color: #fff; }
@@ -472,11 +518,12 @@ ol.steps li::before {
 .key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 .key i.ln { width: 16px; height: 3px; border-radius: 2px; }
 .key i.dash { width: 16px; height: 0; border-top: 2px dashed var(--label-2); border-radius: 0; }
+.key i.pace { width: 16px; height: 0; border-top: 2px dashed var(--label); border-radius: 0; }
+.key i.pred { width: 16px; height: 0; border-top: 2px dotted var(--fuel); border-radius: 0; }
 .sw-fuel { background: var(--fuel); }
 .sw-water { background: var(--water); }
 .sw-effort { background: var(--effort); }
 .sw-ink { background: var(--label); }
-.sw-pred { background: var(--fuel); }
 .ax { fill: var(--label-2); font: 11px var(--font); font-variant-numeric: tabular-nums; }
 .grid { stroke: var(--sep); stroke-width: 1; stroke-dasharray: 2 3; }
 .base { stroke: var(--sep); stroke-width: 1; }
@@ -490,6 +537,14 @@ ol.steps li::before {
 .l-weight { fill: none; stroke: var(--label); stroke-width: 2; stroke-linejoin: round; }
 .d-weight { fill: var(--label); stroke: var(--cell); stroke-width: 2; }
 .l-pred { fill: none; stroke: var(--fuel); stroke-width: 2; stroke-dasharray: 2 4; stroke-linecap: round; }
+/* The forecast carries the trend on in its own ink, dashed, so it stands apart from the grey plan line where the two meet. */
+.l-pace { fill: none; stroke: var(--label); stroke-width: 2; stroke-dasharray: 6 4; }
+.tiles + .card { margin-top: 8px; }
+.chart + .section-foot { margin-bottom: 16px; }
+.milestones { --inset: 50px; }
+.milestones .accessory .i { width: 22px; height: 22px; }
+/* Not yet earned: an empty ring the size of the check's disc, like the shopping list's open ticks. */
+.open-mark { width: 18px; height: 18px; margin: 2px; border-radius: 50%; border: 1.5px solid var(--label-3); }
 .hit { fill: transparent; cursor: pointer; }
 .burn-card p, .bp-card p { margin: 6px 4px 0; font-size: 0.94rem; line-height: 1.38; }
 .bp-card .chart-big { margin: 0 4px; }
@@ -555,22 +610,24 @@ dialog#sheet.closing::backdrop { opacity: 0; }
 .sheet-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.015em; }
 .sheet .segmented { margin-bottom: 10px; }
 .sheet .chips { margin-bottom: 8px; }
+.form-error { color: var(--danger); overflow-wrap: anywhere; }
 #tip {
   position: fixed; z-index: 45; max-width: 230px; padding: 8px 12px; border-radius: 12px; pointer-events: none;
   background: var(--glass-strong); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
   color: var(--label); font-size: 0.76rem; line-height: 1.4; white-space: pre-line;
 }
+/* Centred by its margins between two insets, not by left: 50%, which would cap its shrink-to-fit width at half the screen. */
 #toast {
-  position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 40;
-  display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 12px 18px; border-radius: 999px;
+  position: fixed; left: 16px; right: 16px; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 40;
+  display: flex; align-items: center; gap: 12px; width: fit-content; max-width: calc(100vw - 32px); margin: 0 auto; padding: 12px 18px; border-radius: 999px;
   background: var(--glass-strong); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
   color: var(--label); font-size: 0.88rem; font-weight: 600;
-  opacity: 0; pointer-events: none; transform: translate(-50%, 8px);
+  opacity: 0; pointer-events: none; transform: translateY(8px);
   transition: opacity 0.2s ease, transform 0.3s var(--ease);
 }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.show { opacity: 1; transform: none; }
 #toast.has-btn { pointer-events: auto; padding: 8px 8px 8px 18px; }
 .toast-undo { background: var(--label); color: var(--inverse); }
 .update {
@@ -607,12 +664,17 @@ dialog#sheet.closing::backdrop { opacity: 0; }
   :root { --label-2: #48484a; --label-3: #636366; --sep: #8e8e93; --glass: var(--cell); --glass-strong: var(--cell); --glass-line: var(--sep); }
   .navbar, .tabs, .rest, #tip, #toast, .update { -webkit-backdrop-filter: none; backdrop-filter: none; }
   .group, .card, .callout, .tile-card { box-shadow: inset 0 0 0 1px var(--sep); }
+  /* --label-2 darkens towards the ink here, so the dashed target lines keep the lighter grey the pace line stands apart from. */
+  .l-target { stroke: var(--label-3); }
+  .key i.dash { border-top-color: var(--label-3); }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
   :root { --label-2: #d1d1d6; --label-3: #aeaeb2; }
 }
 @media (max-width: 370px) {
   .ring-art { width: 80px; height: 80px; }
+  .water-btns .btn .i { display: none; } /* three pills and Undo then fit a 320 px screen */
+  .segmented button { padding: 0 3px; }
   .tiles { grid-template-columns: 1fr; }
   .months { grid-template-columns: repeat(4, 1fr); }
 }
