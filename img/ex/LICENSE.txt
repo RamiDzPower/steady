@@ -28,8 +28,9 @@ Workout Guide credits the other files to Bryl Lim.
 
 Changes: none. Each file is a byte-for-byte copy of the original at the commit above.
 Only the names differ: assets/<exercise>/frame-<n>.svg is saved here as <exercise>-<n>.svg.
-The drawings are white on a transparent background. In light mode Steady shows them in
-black with a CSS filter at display time, which leaves the files themselves unchanged.
+The drawings are white on a transparent background. At display time Steady uses a CSS
+filter to show them in black in light mode and dim them to 85% brightness in dark mode,
+which leaves the files themselves unchanged.
 
 Files and their originals (under packages/workout-guide/assets/ at the commit above):
 

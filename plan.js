@@ -521,14 +521,30 @@ export const SHORTCUT_OUT = [
   "Copy totals for Health uses the clipboard, so Universal Clipboard can also pass the day's totals to a Mac or iPad on the same Apple Account. To stop that, turn off Handoff in the iPhone's Settings.",
 ];
 
-// ---- What's new, shown once after an update. Raise APP_VERSION when the list changes. ----
-export const APP_VERSION = 5;
+// ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
+export const APP_VERSION = 6;
 export const CHANGES = [
-  'The Steady Watch shortcut has new steps. It brings in a week at a time and your VO2max, and keeps the numbers off your Mac. Make it again from More, iPhone shortcuts.',
-  'Progress now writes a few sentences each week comparing your food and water with your training.',
-  'Health checks can make a one-page summary for your doctor and share it as a PDF.',
-  'Your weight trend shows the weekly rate and about when you could reach the next milestone.',
-  'A VO2max chart, filled in by the Steady Watch shortcut.',
-  'Bangkok restaurant dishes in Add food. To stop a meal coming back, swap it and tap Do not suggest this again.',
-  'Pause a workout, time your plank holds, and see a picture for most exercises.',
+  {
+    version: 6,
+    notes: [
+      'Small buttons and toggles are easier to hit, and a double tap never logs something twice.',
+      'Discarding a workout now offers Undo instead of asking first.',
+      'Workouts slide in and out, and you can swipe from the left edge to go back.',
+      'Ring numbers roll when you log something, and a saved workout gets a tick.',
+      'Progress shows a bar for each weekly target.',
+      'Dark mode is easier on the eyes, with softer drawings and clearer colours.',
+    ],
+  },
+  {
+    version: 5,
+    notes: [
+      'The Steady Watch shortcut has new steps. It brings in a week at a time and your VO2max, and keeps the numbers off your Mac. Make it again from More, iPhone shortcuts.',
+      'Progress now writes a few sentences each week comparing your food and water with your training.',
+      'Health checks can make a one-page summary for your doctor and share it as a PDF.',
+      'Your weight trend shows the weekly rate and about when you could reach the next milestone.',
+      'A VO2max chart, filled in by the Steady Watch shortcut.',
+      'Bangkok restaurant dishes in Add food. To stop a meal coming back, swap it and tap Do not suggest this again.',
+      'Pause a workout, time your plank holds, and see a picture for most exercises.',
+    ],
+  },
 ];

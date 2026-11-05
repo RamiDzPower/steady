@@ -43,7 +43,13 @@ let wakeLock = null;
 let audio = null;
 let swReg = null;
 let undoSnap = null;
+let undoLive = false; // the Undo toast is showing, so a later save would make its snapshot stale
+let undoTimers = null;
 let titleObserver = null;
+let tapAt = null; // the latest real tap, by time and place
+let guardTap = null; // the latest tap that put something new under the finger, so a second tap there must do nothing
+let resending = false;
+let back = null; // where the screen a session opened from was scrolled to, and the button that opened it
 
 // ---------- Storage ----------
 function blank() {
@@ -69,6 +75,12 @@ function load() {
   return blank();
 }
 function save() {
+  if (undoLive) { // anything saved while Undo shows would be lost by restoring the old state
+    undoLive = false;
+    undoSnap = null;
+    clearTimeout(toastTimer);
+    $('#toast').classList.remove('show', 'has-btn');
+  }
   L.applyHolds(state, todayISO()); // a paste or a late log can bring last week up to half, which lifts this week's automatic hold
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -86,6 +98,8 @@ const isHot = (date) => (state.settings.hotMonths || []).includes(L.parse(date).
 const hasLog = (d) => { const x = state.days[d]; return !!(x && (x.foods?.length || x.water?.length || x.workouts?.length)); };
 function snapshot() {
   undoSnap = JSON.stringify(state);
+  undoLive = false;
+  undoTimers = { rest: ui.rest, hold: ui.hold }; // Undo also puts back a rest or hold that the action started or stopped
 }
 
 // ---------- Rendering ----------
@@ -93,10 +107,13 @@ const VIEWS = { today: viewToday, train: viewTrain, food: viewFood, progress: vi
 
 function render(top = false) {
   stopTicker();
+  if (top) guardTap = tapAt; // a new screen comes up under the finger, and the second tap of a double tap would land on it
   if (!state.profile) ui.screen = 'setup';
+  if (swipe && ui.screen !== 'session') { clearTimeout(swipe.timer); swipe.under?.remove(); swipe = null; } // a tab tapped mid-swipe
   const focusKey = top ? null : keyOf(document.activeElement);
   const chipX = $('#main .chips')?.scrollLeft ?? 0;
   $('#main').innerHTML = VIEWS[ui.screen]();
+  rollRings();
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   $('.tabs').hidden = ui.screen === 'setup';
   ui.onToday = ui.date === todayISO();
@@ -109,6 +126,22 @@ function render(top = false) {
   }
   observeTitle();
   keepChip(chipX);
+  if (swipe?.under && ui.screen === 'session') reswipe();
+}
+// As on iOS only a session's push and pop slide; tabs, and browsers without view transitions, switch at once.
+let sliding = null;
+function slide(dir, update) {
+  if (!dir || !document.startViewTransition) return update();
+  const root = document.documentElement;
+  delete root.dataset.slide; // a slide still running ends as this one starts
+  // Set only once the old screen is captured, so its title bar is captured as it looked.
+  const t = (sliding = document.startViewTransition(() => { root.dataset.slide = dir; update(); }));
+  t.ready.catch(() => {}); // a hidden document aborts the transition; the screen still changes
+  t.finished.catch(() => {}).finally(() => {
+    if (sliding !== t) return; // a newer slide owns the attribute now
+    sliding = null;
+    delete root.dataset.slide;
+  });
 }
 // The section chips scroll sideways: keep the row where it was and bring the selected chip into view.
 function keepChip(x) {
@@ -153,6 +186,20 @@ function ring(kind, name, value, target, valText, unit, ofText, iconName) {
     <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}</svg>${icon(iconName, 'ring-icon')}</div>
     <figcaption><span class="ring-name">${name}</span><span class="ring-val"><span class="num">${valText}</span><span class="unit"> ${unit}</span></span><span class="ring-of">${ofText}</span></figcaption>
   </figure>`;
+}
+// Kept per day, and over screens without rings, so a workout saved in a session still rolls in on Today.
+let rings = null;
+function rollRings(root = $('#main')) {
+  const nums = [...root.querySelectorAll('.ring-val .num')];
+  if (!nums.length) return;
+  const was = rings?.date === ui.date ? rings.vals : [];
+  rings = { date: ui.date, vals: nums.map((n) => n.textContent) };
+  nums.forEach((n, i) => {
+    const now = rings.vals[i];
+    if (was[i] == null || was[i] === now) return;
+    const roll = L.rollMask(was[i], now);
+    n.innerHTML = `<span class="sr-only">${esc(now)}</span><span class="rolling" aria-hidden="true">${[...now].map((c, j) => (roll[j] ? `<span class="roll">${c}</span>` : esc(c))).join('')}</span>`;
+  });
 }
 function minibar(value, target, kind, width = 120) {
   const f = target > 0 ? Math.min(value / target, 1) : 0;
@@ -417,7 +464,7 @@ function viewTrain() {
     <div class="cell-main"><div class="cell-title">${esc(b.name)}</div><div class="cell-sub">${b.weeks[1] ? `Weeks ${b.weeks[0]} to ${b.weeks[1]}` : `Week ${b.weeks[0]} on`}. ${b.targets.exMin} exercise minutes and ${b.targets.strength} strength ${b.targets.strength > 1 ? 'sessions' : 'session'} a week, ${fmt(b.targets.steps)} steps a day.</div><p class="cell-text">${esc(b.intro)}</p></div></div>`).join('')}</div>
   ${foot(`${esc(DELOAD)} Check-ins fall on the 3-month, 6-month and 1-year marks.`)}
   ${sectionHead('Stop and check')}
-  <div class="card prose"><ul>${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
+  <div class="card prose"><ul class="prose-list">${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
 }
 
 // ---------- Session ----------
@@ -439,6 +486,15 @@ function startActive() {
   unlockAudio();
   wake(true);
 }
+// Starts the open session unless it runs already; a different one running is discarded at once, and the returned toast offers Undo.
+function startOver() {
+  if (isActive(ui.session.date, ui.session.id)) return '';
+  const other = state.active;
+  if (other) snapshot();
+  startActive();
+  // The date tells last week's Strength A from the one starting now.
+  return other ? `${SESSIONS[other.id]?.name ?? 'The other session'}${other.date === ui.session.date ? '' : ` for ${short(other.date)}`} discarded` : '';
+}
 
 function viewSession() {
   const { date, id } = ui.session;
@@ -450,7 +506,8 @@ function viewSession() {
   const logged = state.days[date]?.workouts?.map((w, i) => ({ w, i })).filter(({ w }) => w.id === id) ?? [];
   const otherActive = state.active && !active;
   const hot = isHot(date) && (s.kind === 'cardio' || s.outdoor);
-  return `
+  // The rest bar stays outside the part an edge swipe moves, as a moved parent would pin the fixed bar to itself.
+  return `<div class="pushed">
   <div class="back-row"><button class="back" data-act="close-session">${icon('caret-left')}<span>${ui.tab === 'today' ? 'Today' : 'Train'}</span></button></div>
   ${nav(esc(s.name), `${esc(dateText(date))}, about ${s.minutes} minutes${s.reps && s.id === 'intervals' ? `, ${s.reps} repeats` : ''}`)}
   <div class="chip-row"><span class="chip ${s.effort}">${eff.label}</span>${hr ? `<span class="chip num">${hr}</span>` : ''}<span class="chip">RPE ${eff.rpe}</span></div>
@@ -469,10 +526,10 @@ function viewSession() {
   ${s.id === 'intervals' && active ? '<div class="card phase" id="phase"></div>' : ''}
   ${s.id === 'intervals' ? foot(`Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.`) : ''}
   ${s.exercises ? `<div class="exlist">${s.exercises.map(([exId, sets, spec, rest], i) => exerciseCard(exId, sets, spec, rest, i, active)).join('')}</div>${foot(esc(PROGRESSION))}` : ''}
-  <div id="rest" class="rest" hidden></div>
   ${logged.length ? `${sectionHead('Logged')}<div class="group">${logged.map(({ w, i }) => `<div class="cell"><span class="tile effort">${icon('check')}</span><div class="cell-main"><div class="cell-title">${w.min} min, RPE ${w.rpe}${w.hr ? `, ${w.hr} bpm` : ''}</div>
       <div class="cell-sub">${esc(w.t || '')}${w.note ? `. ${esc(w.note)}` : ''}${w.ex?.length ? `. ${esc(w.ex.filter((e) => e.kg || e.reps).map((e) => `${EXERCISES[e.id]?.name}: ${e.kg ? `${e.kg} kg × ` : ''}${e.reps ?? ''}`).join(', '))}` : ''}</div></div>
-      <button class="icon-btn" data-act="workout-del" data-i="${i}" aria-label="Remove this log">${icon('x')}</button></div>`).join('')}</div>` : ''}`;
+      <button class="icon-btn" data-act="workout-del" data-i="${i}" aria-label="Remove this log">${icon('x')}</button></div>`).join('')}</div>` : ''}</div>
+  <div id="rest" class="rest" hidden></div>`;
 }
 
 function exerciseCard(exId, sets, spec, rest, i, active) {
@@ -572,13 +629,15 @@ function bar(r, cls, label, time, sub, btn) {
   const html = `<div>${label ? `<div class="rest-label">${label}</div>` : ''}<div class="rest-time"></div>${sub ? `<div class="rest-next">${sub}</div>` : ''}</div>${btn}`;
   r.hidden = false;
   r.className = cls;
-  if (r.dataset.html !== html) {
+  const fresh = r.dataset.html !== html;
+  if (fresh) {
     const had = r.contains(document.activeElement);
     r.innerHTML = html;
     r.dataset.html = html;
     if (had) r.querySelector('button').focus({ preventScroll: true }); // a new label must not drop the focus its button had
   }
   r.querySelector('.rest-time').textContent = time;
+  if (fresh) document.body.style.setProperty('--rest-h', `${r.offsetHeight}px`); // the toast rises above the bar, one line of text or two
 }
 // Ticks set k and the ones before it, or unticks from k if it was done. A new set starts the rest, unless nothing is left.
 function tickSet(i, k, show = render) {
@@ -869,8 +928,8 @@ function legend(items) {
 function chartBox(title, big, legendHtml, svg, hint = 'Tap a day for its numbers.') {
   return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. ${hint}">${svg}</svg></section>`;
 }
-// A finger-sized tap area over a dot, as the dots on the weight and VO2max charts are under 10 px across.
-const dotHit = (cx, cy, tip) => `<circle class="hit" cx="${cx}" cy="${cy}" r="14" data-tip="${esc(tip)}"/>`;
+// Each small dot answers taps over the plot's height out to the midpoints with its neighbours; 29 units either way is 44 px on a 320 px phone.
+const dotHits = (xs, tips) => L.tapSpans(xs, 29, 0, CW).map(([l, r], i) => `<rect class="hit" x="${l.toFixed(1)}" y="${PT}" width="${(r - l).toFixed(1)}" height="${CH - PT - PB}" data-tip="${esc(tips[i])}"/>`).join('');
 function hits(n, bw, tip) {
   return Array.from({ length: n }, (_, i) => `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${CH - PT - PB}" data-tip="${esc(tip(i))}"/>`).join('');
 }
@@ -982,7 +1041,7 @@ function weightChart() {
   const vals = [...ins.map((x) => x[1]), ...goalPts.map((x) => x[1]), ...(predOk ? pred.points.map((x) => x[1]) : []), ...pace.map((x) => x[1])];
   const { x, yv, s, line } = timeAxis(startD, endD, vals);
   const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
-    + ins.map(([d, v]) => dotHit(x(d), yv(v), `${short(d)}: ${v.toFixed(1)} kg\nPlan line: ${goalAt(d).toFixed(1)} kg`)).join('');
+    + dotHits(ins.map(([d]) => x(d)), ins.map(([d, v]) => `${short(d)}: ${v.toFixed(1)} kg\nPlan line: ${goalAt(d).toFixed(1)} kg`));
   const keys = [['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend'], ...(pace.length ? [['pace', 'At this pace']] : []), ['dash', 'Plan line'], ...(predOk ? [['pred', `Expected from ${pred.weeks} fully logged ${pred.weeks === 1 ? 'week' : 'weeks'}`]] : [])];
   const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, plan line ${goalAt(today).toFixed(1)} today`) : '';
   const g = L.goalFor(p);
@@ -1005,7 +1064,7 @@ function vo2Chart() {
   const t = p.vo2Target;
   const { x, yv, s, line } = timeAxis(startD, endD, [...pts.map((r) => r[1]), ...(t ? [t] : [])]);
   const dots = pts.map(([d, v]) => `<circle class="d-effort" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
-    + pts.map(([d, v]) => dotHit(x(d), yv(v), `${short(d)}: ${v.toFixed(1)} mL/kg/min`)).join('');
+    + dotHits(pts.map(([d]) => x(d)), pts.map(([d, v]) => `${short(d)}: ${v.toFixed(1)} mL/kg/min`));
   const keys = [['sw-effort', 'Readings'], ['sw-effort ln', 'Trend'], ...(t ? [['dash', 'Your target']] : [])];
   return `${chartBox('VO2max', bigNum(v1.toFixed(1), 'mL/kg/min', `on ${esc(short(d1))}`), legend(keys), `${s}${t ? line([[startD, t], [endD, t]], 'l-target') : ''}${line(L.smooth(pts), 'l-effort')}${dots}`, 'Tap a reading for its value.')}
   ${foot(`${signedDec(v1 - v0)} mL/kg/min since ${esc(short(d0))}.`)}`;
@@ -1076,19 +1135,21 @@ function viewCharts() {
   const kgWeek = wk.balance.length >= 3 ? (-wk.balanceAvg * 7) / L.KCAL_PER_KG : null;
   const counts = L.weekCounts(state, monday);
   const any = Object.values(state.days).some((d) => d.foods?.length || d.water?.length || d.workouts?.length || d.watch || d.weight);
-  const stat = (label, value) => `<div class="cell"><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value">${value}</span></div>`;
+  const stat = (label, value, bar = '') => `<div class="cell${bar ? ' meter-cell' : ''}"><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value">${value}</span>${bar}</div>`;
+  // Rows with a target show the week as a bar, as Train does; no bar without data or a target.
+  const bar = (value, target, kind) => (value != null && target > 0 ? minibar(value, target, kind, 300) : '');
   const ms = L.milestones(state, today);
   return `${sectionHead('This week')}
   ${weekInsights(today)}
   <div class="group">
-    ${stat('Sessions done', `${wk.done} of ${wk.planned}`)}
-    ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`)}
+    ${stat('Sessions done', `${wk.done} of ${wk.planned}`, bar(wk.done, wk.planned, 'gray'))}
+    ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`, bar(wk.exMin, pos.before ? 0 : pos.block.targets.exMin, 'effort'))}
     ${stat('Training load', `${fmt(wk.load)} (RPE × min)`)}
     ${stat('Average steps', wk.stepsAvg != null ? fmt(wk.stepsAvg) : 'no data')}
-    ${stat('Food logged', `${wk.daysLogged} of 7 days`)}
-    ${stat('Average eaten', wk.kcalAvg != null ? `${fmt(wk.kcalAvg)} of ${fmt(tg.kcal)} kcal` : 'no data')}
-    ${stat('Average protein', wk.proteinAvg != null ? `${wk.proteinAvg} of ${tg.protein} g` : 'no data')}
-    ${stat('Average water', wk.waterAvg != null ? `${litres(wk.waterAvg)} of ${litres(wk.waterTargetAvg)} L` : 'no data')}
+    ${stat('Food logged', `${wk.daysLogged} of 7 days`, bar(wk.daysLogged, 7, 'gray'))}
+    ${stat('Average eaten', wk.kcalAvg != null ? `${fmt(wk.kcalAvg)} of ${fmt(tg.kcal)} kcal${wk.kcalAvg > tg.kcal ? `, ${fmt(wk.kcalAvg - tg.kcal)} over` : ''}` : 'no data', bar(wk.kcalAvg, tg.kcal, wk.kcalAvg > tg.kcal ? 'fuel-over' : 'fuel'))}
+    ${stat('Average protein', wk.proteinAvg != null ? `${wk.proteinAvg} of ${tg.protein} g` : 'no data', bar(wk.proteinAvg, tg.protein, 'fuel'))}
+    ${stat('Average water', wk.waterAvg != null ? `${litres(wk.waterAvg)} of ${litres(wk.waterTargetAvg)} L` : 'no data', bar(wk.waterAvg, wk.waterTargetAvg, 'water'))}
     ${stat('Sugary drinks', `${counts.sugary}, aim for none`)}
     ${stat('Red meat, offal or shellfish', `${counts.purine}, aim for 2 or fewer`)}
     ${stat('In minus out, per day', wk.balanceAvg != null ? `${signed(wk.balanceAvg)} kcal` : 'no data')}
@@ -1276,7 +1337,7 @@ function viewMore() {
   <div class="card prose"><ul class="prose-list">${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>
   <div class="group">${action('whats-new', 'sparkle', 'water', "What's new")}</div>
   <div class="group danger-group"><button class="cell cell-action danger" data-act="reset">${icon('trash')}<span>Delete all data</span></button></div>
-  ${foot('Icons by Phosphor Icons, MIT licence. Exercise drawings from Workout Guide by Bryl Lim, some traced from Everkinetic, under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0), shown in black in light mode. Full credits for them are in img/ex/LICENSE.txt. Thai dish values from the Thai Food Composition Database (INMU, Mahidol University, 2025), the Thai Department of Health food tables (2008 and 2018) and a Bangkok delivery food study (IJERPH, 2023).')}`;
+  ${foot('Icons by Phosphor Icons, MIT licence. Exercise drawings from Workout Guide by Bryl Lim, some traced from Everkinetic, under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0), shown in black in light mode and dimmed to 85% brightness in dark mode. Full credits for them are in img/ex/LICENSE.txt. Thai dish values from the Thai Food Composition Database (INMU, Mahidol University, 2025), the Thai Department of Health food tables (2008 and 2018) and a Bangkok delivery food study (IJERPH, 2023).')}`;
 }
 
 function sheetShortcuts() {
@@ -1285,9 +1346,10 @@ function sheetShortcuts() {
     ${sectionHead('Steady to Health', 'Steady into Health')}<div class="card prose"><ol class="steps">${SHORTCUT_OUT.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
     ${foot('Shortcuts menus differ a little between iOS versions. If a name does not match exactly, pick the closest one.')}</div>`;
 }
-function sheetChanges() {
-  return `<div class="sheet">${sheetHead("What's new")}
-    <div class="card prose"><ul class="prose-list">${CHANGES.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div></div>`;
+function sheetChanges(seen) {
+  const cards = L.changesSince(CHANGES, seen).map((c, i) => `${sectionHead(i ? 'Earlier' : 'This update')}
+    <div class="card prose"><ul class="prose-list">${c.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
+  return `<div class="sheet">${sheetHead("What's new")}${cards}</div>`;
 }
 function sheetPaste(text = null) {
   return `<div class="sheet">${sheetHead('Paste Watch numbers')}
@@ -1339,6 +1401,7 @@ function sheetUnlock() {
 let sheetReturn = null;
 function showSheet(html) {
   const s = $('#sheet');
+  guardTap = tapAt; // the sheet comes up under the finger, and the second tap of a double tap would land on it or its backdrop
   s.classList.remove('closing');
   s.style.transform = '';
   s.innerHTML = html;
@@ -1351,14 +1414,16 @@ function showSheet(html) {
 function closeSheet() {
   const s = $('#sheet');
   if (!s.open || s.classList.contains('closing')) return;
+  guardTap = tapAt; // the page comes back under the finger, and a slow second tap would land on whatever is there
   s.classList.add('closing');
+  s.firstElementChild.inert = true; // nothing in it takes a tap or a key on the way down, so Save cannot run twice
   const done = (e) => {
     // The backdrop's fade ends first and reports on the dialog too, and Safari gives it no pseudoElement name,
     // so wait for the property only the sheet animates: its slide, or its fade under Reduce Motion.
     if (e && (e.target !== s || e.propertyName !== (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'opacity' : 'transform'))) return;
     s.removeEventListener('transitionend', done);
     clearTimeout(timer);
-    if (!s.classList.contains('closing')) return; // reopened or caught by a drag on the way down
+    if (!s.classList.contains('closing')) return; // reopened on the way down; a closing sheet takes no drag
     s.classList.remove('closing');
     s.close();
     s.innerHTML = '';
@@ -1386,7 +1451,6 @@ function dragSheet(e) {
   s.setPointerCapture(e.pointerId);
   s.style.transition = 'none';
   s.style.transform = `translateY(${from}px)`;
-  s.classList.remove('closing');
   const move = (m) => {
     s.style.transform = `translateY(${at(m.clientY)}px)`;
     trail = [...trail.slice(-4), [m.timeStamp, m.clientY]];
@@ -1407,6 +1471,119 @@ function dragSheet(e) {
   s.addEventListener('pointerup', up);
   s.addEventListener('pointercancel', up);
 }
+
+// ---------- Edge swipe back ----------
+// As on iOS, a drag from a session's left edge pulls it aside over the screen it came from.
+let swipe = null;
+const pushedParts = () => [$('#main > .pushed'), $('#rest')]; // looked up each time, as a render can replace them
+const onScreen = () => new DOMMatrixReadOnly(getComputedStyle(swipe.under).transform).m41 + innerWidth; // swipe.x is the target mid-settle
+function swipeTo(x) {
+  const w = innerWidth;
+  const [page, dim] = swipe.under.children;
+  for (const el of pushedParts()) if (el) el.style.transform = `translate3d(${x}px, 0, 0)`;
+  // The screen behind starts 30% to the left, where a push leaves it.
+  swipe.under.style.transform = `translateX(${x - w}px)`;
+  page.style.transform = `translate(${0.7 * (w - x)}px, ${-(back?.y ?? 0)}px)`;
+  dim.style.opacity = 0.1 * (1 - x / w);
+  swipe.x = x;
+}
+function swipeEase(ms) {
+  const t = ms ? `transform ${ms}ms var(--ease), opacity ${ms}ms var(--ease)` : 'none';
+  for (const el of [...pushedParts(), swipe.under, ...swipe.under.children]) if (el) el.style.transition = t;
+}
+function settle(to, v) {
+  const { x } = swipe;
+  // var(--ease) starts at 2.5 times its average speed, so this duration hands the finger's speed on to the screen.
+  const ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0
+    : Math.round(Math.min(350, Math.max(160, (2.5 * Math.abs(to - x)) / Math.max(0.5, Math.sign(to - x) * v))));
+  swipeEase(ms);
+  swipeTo(to);
+  const done = () => {
+    swipe.under.remove();
+    if (!to) rings = swipe.rings; // a cancelled swipe has not shown the numbers, so Back still rolls them
+    swipe = null;
+    for (const el of pushedParts()) el?.removeAttribute('style');
+    if (to && ui.screen === 'session') ACT['close-session']();
+  };
+  if (ms) swipe.timer = setTimeout(done, ms + 50);
+  else done();
+}
+// A render mid-swipe drew new parts: they go where the old ones are on screen, and a settle starts again from there.
+function reswipe() {
+  if (!swipe.timer) return swipeTo(swipe.x);
+  const to = swipe.x;
+  const x = onScreen();
+  clearTimeout(swipe.timer);
+  swipeEase(0);
+  swipeTo(x);
+  void document.body.offsetWidth; // so the new parts move on from there rather than jump
+  settle(to, 0);
+}
+// Zoomed in, a sideways drag must pan the view, so the edge swipe and its touch-action rule step aside; 1.01 allows for rounding.
+const zoomed = () => document.documentElement.toggleAttribute('data-zoomed', window.visualViewport?.scale > 1.01);
+window.visualViewport?.addEventListener('resize', zoomed);
+zoomed();
+let pressAt = null;
+document.addEventListener('pointerdown', (e) => {
+  // A press during a slide lands on the page root: it ends the slide, and the click handler passes its click on.
+  pressAt = sliding && [e.clientX, e.clientY];
+  sliding?.skipTransition();
+  if (ui.screen !== 'session' || $('#sheet').open || !e.isPrimary || e.button > 0 || zoomed()) return;
+  if (!e.target.closest?.('#main') && e.target !== document.body && e.target !== document.documentElement) return;
+  const at = { id: e.pointerId, x0: e.clientX, y0: e.clientY, trail: [[e.timeStamp, e.clientX]] };
+  if (swipe?.under) {
+    if (!swipe.timer) return;
+    // Caught on its way: it carries on from where it is on screen.
+    clearTimeout(swipe.timer);
+    const x = onScreen();
+    Object.assign(swipe, at, { timer: null, from: x });
+    swipeEase(0);
+    swipeTo(x);
+    $('#main').setPointerCapture(e.pointerId);
+    return;
+  }
+  swipe = e.clientX < 20 ? { ...at, from: 0 } : null;
+});
+document.addEventListener('pointermove', (e) => {
+  if (!swipe || e.pointerId !== swipe.id || swipe.timer) return;
+  const dx = e.clientX - swipe.x0;
+  if (!swipe.under) {
+    const dy = e.clientY - swipe.y0;
+    if (Math.hypot(dx, dy) < 10) return;
+    if (Math.abs(dy) >= Math.abs(dx)) { swipe = null; return; } // a scroll, which stays with the page
+    swipe.under = document.createElement('div');
+    swipe.under.className = 'under';
+    swipe.under.inert = true;
+    swipe.under.innerHTML = `<main>${VIEWS[ui.tab]()}</main><div class="under-dim"></div>`;
+    swipe.rings = rings;
+    rollRings(swipe.under); // its numbers roll here as on a pop, so the screen that lands does not roll them again
+    document.body.append(swipe.under);
+    swipeEase(0);
+    $('#main').setPointerCapture(e.pointerId);
+  }
+  const x = swipe.from + dx;
+  swipeTo(x < 0 ? -rubberband(-x, innerWidth) : x);
+  swipe.trail = [...swipe.trail.slice(-4), [e.timeStamp, e.clientX]];
+});
+const swipeEnd = (e) => {
+  if (!swipe || e.pointerId !== swipe.id || swipe.timer) return;
+  if (!swipe.under) { swipe = null; return; } // a tap, or a scroll the page took over
+  // Velocity over the last 100 ms up to the release, as for the sheet.
+  const recent = [...swipe.trail, [e.timeStamp, e.clientX]].filter(([t]) => e.timeStamp - t <= 100);
+  const [t0, x0] = recent[0];
+  const [t1, x1] = recent.at(-1);
+  const v = (x1 - x0) / Math.max(1, t1 - t0);
+  // The drag, or a tap that caught the screen, still ends in a click, which must not act; the next press is a new tap.
+  const stop = (c) => { c.stopPropagation(); c.preventDefault(); };
+  const off = () => window.removeEventListener('click', stop, true);
+  window.addEventListener('click', stop, { capture: true, once: true });
+  window.addEventListener('pointerdown', off, { capture: true, once: true });
+  setTimeout(off, 300);
+  settle(e.type === 'pointerup' && swipe.x + project(v) > innerWidth / 3 ? innerWidth : 0, v);
+};
+document.addEventListener('pointerup', swipeEnd);
+document.addEventListener('pointercancel', swipeEnd);
+
 function showTip(el, e) {
   const tip = $('#tip');
   tip.textContent = el.dataset.tip;
@@ -1419,7 +1596,7 @@ function hideTip() {
   $('#tip').hidden = true;
 }
 let toastTimer = null;
-function toast(msg, undo = false) {
+function toast(msg, undo = false, typing = false) {
   const err = !undo && $('#sheet[open]:not(.closing) .form-error'); // the open sheet covers the toast
   if (err) {
     err.textContent = msg;
@@ -1429,11 +1606,15 @@ function toast(msg, undo = false) {
   t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button class="btn btn-sm toast-undo" data-act="undo">Undo</button>' : ''}`;
   t.classList.toggle('has-btn', undo);
   t.classList.add('show');
+  undoLive = undo && !!undoSnap;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
+  const hide = () => {
     t.classList.remove('show', 'has-btn');
-    if (undo) undoSnap = null;
-  }, undo ? 6000 : 2200);
+    if (undo) { undoSnap = null; undoLive = false; }
+  };
+  // Only a toast raised while typing waits: the phone keyboard hides it, so its 6 seconds start once no field has focus; the first look waits, as the next field takes focus only after the change event.
+  const wait = () => { toastTimer = document.activeElement?.matches?.('#main input') ? setTimeout(wait, 300) : setTimeout(hide, 6000); };
+  toastTimer = typing ? setTimeout(wait, 300) : setTimeout(hide, undo ? 6000 : 2200);
 }
 
 async function shareFile(name, type, text) {
@@ -1489,6 +1670,7 @@ function summarySheet(s, w, date) {
   const next = L.nextSession(state, todayISO());
   const row = (ic, label, value) => `<div class="cell"><span class="tile effort">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value num">${value}</span></div>`;
   return `<div class="sheet">${sheetHead(`${esc(s.name)} saved`)}
+    <svg class="success" viewBox="0 0 56 56" aria-hidden="true"><path pathLength="1" d="M28 3a25 25 0 1 1 0 50a25 25 0 1 1 0-50"/><path pathLength="1" d="M17 29l7.5 7.5L39 22"/></svg>
     <div class="group">${row('timer', 'Minutes', `${fmt(w.min)} min`)}${row('flame', 'Effort', `RPE ${w.rpe}`)}${planned ? row('list-checks', 'Sets done', `${sets} of ${planned}`) : ''}</div>
     ${up.length ? `${sectionHead('Heavier than last time')}<div class="group">${up.map((x) => row('barbell', esc(EXERCISES[x.id]?.name ?? ''), `${x.was} to ${x.kg} kg`)).join('')}</div>` : ''}
     ${next ? `${sectionHead('Next session')}<div class="group"><div class="cell"><span class="tile effort">${icon(sessionIcon(next.session))}</span><div class="cell-main"><div class="cell-title">${esc(next.session.name)}</div><div class="cell-sub">${esc(dateText(next.date))}, ${next.session.minutes} min</div></div></div></div>` : ''}
@@ -1558,6 +1740,8 @@ const ACT = {
     if (!undoSnap) return;
     state = JSON.parse(undoSnap);
     undoSnap = null;
+    Object.assign(ui, undoTimers);
+    if (state.active) wake(true); // a discarded session that comes back keeps the screen on again
     save();
     render();
     toast('Undone');
@@ -1696,24 +1880,30 @@ const ACT = {
   },
   'sheet-close': () => closeSheet(),
   'open-session': (el) => {
+    back = { y: window.scrollY, key: keyOf(el) };
     ui.session = { date: el.dataset.date || ui.date, id: el.dataset.id };
     ui.screen = 'session';
     ui.rest = null;
     ui.hold = null;
-    render(true);
+    slide('push', () => render(true));
   },
-  'close-session': () => {
+  // An edge swipe calls this with no button once it has moved the screens itself, so then nothing slides.
+  'close-session': (el) => {
     ui.screen = ui.tab;
     ui.rest = null;
     ui.hold = null;
     if (!state.active) wake(false);
-    render(true);
+    slide(el && 'pop', () => {
+      render(true);
+      window.scrollTo(0, back?.y ?? 0);
+      (back?.key && $(back.key))?.focus({ preventScroll: true });
+    });
   },
   start: () => {
-    if (state.active && !confirm('Another session is running. Discard it and start this one?')) return;
-    startActive();
+    const note = startOver();
     save();
     render();
+    if (note) toast(note, true);
   },
   'walk-log': (el) => {
     rw(el.dataset.date).workouts.push({ id: 'walks', name: SESSIONS.walks.name, min: 10, rpe: DEFAULT_RPE.easy, hr: null, note: '', t: clock(), ex: [] });
@@ -1734,16 +1924,14 @@ const ACT = {
   },
   set: (el) => {
     const i = Number(el.dataset.i), k = Number(el.dataset.k);
-    if (!isActive(ui.session.date, ui.session.id)) {
-      if (state.active && !confirm('Another session is running. Discard it and start this one?')) return;
-      startActive();
-    }
+    const note = startOver();
     unlockAudio();
     const held = ui.hold?.i === i && ui.hold.k === k;
     ui.hold = null;
     // A timed set runs its hold first; a tap during the hold ticks it straight away.
-    if (!held && k >= (state.active.sets[i] ?? 0) && L.repSpec(currentSession().exercises[i][2]).unit === 's') return startHold(i, k);
-    tickSet(i, k);
+    if (!held && k >= (state.active.sets[i] ?? 0) && L.repSpec(currentSession().exercises[i][2]).unit === 's') startHold(i, k);
+    else tickSet(i, k);
+    if (note) toast(note, true);
   },
   'hold-done': () => {
     const h = ui.hold;
@@ -1799,7 +1987,7 @@ const ACT = {
     pressSegment(el);
   },
   discard: () => {
-    if (!confirm('Discard this session without saving it?')) return;
+    snapshot();
     state.active = null;
     ui.rest = null;
     ui.hold = null;
@@ -1807,6 +1995,7 @@ const ACT = {
     wake(false);
     closeSheet();
     render();
+    toast('Session discarded', true);
   },
   'workout-del': (el) => {
     snapshot();
@@ -1917,7 +2106,7 @@ const ACT = {
     }
   },
   'shortcut-help': () => showSheet(sheetShortcuts()),
-  'whats-new': () => showSheet(sheetChanges()),
+  'whats-new': () => showSheet(sheetChanges(state.seenVersion)),
   ics: () => {
     const cal = reminderFile();
     if (!cal) return;
@@ -1940,6 +2129,7 @@ const ACT = {
     swReg?.waiting?.postMessage('skip');
   },
   reset: () => {
+    // This asks first instead of offering Undo: it replaces all the data, more than an in-memory Undo can promise back.
     if (!confirm('Delete everything in Steady on this phone? Export a backup first if you might want it back.')) return;
     localStorage.removeItem(KEY);
     localStorage.removeItem(`${KEY}.unreadable`);
@@ -1963,13 +2153,13 @@ function renderWhenIdle() {
 document.addEventListener('focusout', () => { if (pending) renderWhenIdle(); });
 
 function exLog(el, key, value) {
-  if (!isActive(ui.session.date, ui.session.id)) {
-    if (state.active && !confirm('Another session is running. Discard it and start this one?')) return;
-    startActive();
-  }
+  const started = !isActive(ui.session.date, ui.session.id);
+  const note = startOver();
   const i = Number(el.dataset.i);
   state.active.log[i] = { ...(state.active.log[i] ?? {}), [key]: value };
   save();
+  if (started) renderWhenIdle(); // the screen shows the session running once the keyboard is done
+  if (note) toast(note, true, true);
 }
 
 const CHANGE = {
@@ -2147,7 +2337,8 @@ const SUBMIT = {
     if (pass !== f.elements.pass2.value) return toast('The two passcodes do not match.');
     if (pass && pass.length < 6) return toast('Use at least 6 characters for the passcode.');
     const data = { ...state, active: null };
-    const body = pass ? await L.encryptJson(data, pass) : data;
+    const body = pass ? await busy(f, 'Locking…', () => L.encryptJson(data, pass)) : data;
+    if (!f.isConnected || dismissed()) return;
     const ok = await shareFile(`steady-backup-${todayISO()}${pass ? '-protected' : ''}.json`, 'application/json', JSON.stringify(body));
     if (!ok) return;
     state.lastBackup = todayISO();
@@ -2158,7 +2349,8 @@ const SUBMIT = {
   },
   unlock: async (f) => {
     try {
-      const data = await L.decryptJson(ui.pendingFile, f.elements.pass.value);
+      const data = await busy(f, 'Opening…', () => L.decryptJson(ui.pendingFile, f.elements.pass.value));
+      if (!f.isConnected || dismissed()) return;
       ui.pendingFile = null;
       closeSheet();
       restoreBackup(data);
@@ -2167,6 +2359,26 @@ const SUBMIT = {
     }
   },
 };
+
+// A sheet closed during the wait means the user backed out; the finished work must not go on.
+const dismissed = () => !$('#sheet').open || $('#sheet').classList.contains('closing');
+// A passcode means 250,000 PBKDF2 rounds, a noticeable wait on a phone: the button says what it is doing meanwhile.
+async function busy(f, label, work) {
+  const b = f.querySelector('[type="submit"]');
+  const text = b.textContent;
+  const hadFocus = document.activeElement === b;
+  b.disabled = true;
+  b.setAttribute('aria-busy', 'true');
+  b.textContent = label;
+  try {
+    return await work();
+  } finally {
+    b.disabled = false;
+    b.removeAttribute('aria-busy');
+    b.textContent = text;
+    if (hadFocus && b.isConnected) b.focus({ preventScroll: true }); // disabling dropped focus to body
+  }
+}
 
 function reminderFile() {
   const start = [todayISO(), state.profile.startDate].sort().at(-1);
@@ -2181,6 +2393,7 @@ function reminderFile() {
 function restoreBackup(data) {
   try {
     const clean = L.cleanBackup(data);
+    // This asks first instead of offering Undo: it replaces all the data, more than an in-memory Undo can promise back.
     if (!confirm('Replace everything in Steady with this backup?')) return;
     // An older backup must not bring back a What's new this phone has already shown.
     state = { ...blank(), ...clean, seenVersion: Math.max(state.seenVersion || 0, clean.seenVersion) };
@@ -2232,7 +2445,42 @@ async function importFile(input, kind) {
 // ---------- Wiring ----------
 $('.tabs').innerHTML = TABS.map(([id, label, ic]) => `<button type="button" data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`).join('');
 
+// One-shot actions, toggles, remove buttons and forms, the app's idempotency keys: a repeat within 600 ms is the same tap, so a double tap on a button neither switches a toggle back nor removes the row that moves up, and a second tap on Undo or the flash, which stop taking taps, cannot reach what lies under them. Ticks and switches are not guarded. Taps meant to add up, like +250 ml, stay out.
+const ONCE = new Set(['finish', 'quick-log', 'add-food', 'add-recent', 'same-yesterday', 'exclude', 'shop-share', 'doctor-pdf', 'hold-done', 'rest-skip',
+  'use-limit', 'log-menu', 'repeat-week', 'pause', 'food-del', 'workout-del', 'health-del', 'include', 'undo', 'flash-hide',
+  'log-day', 'shop-clear', 'water-undo', 'swap-set', 'skip-hold', 'discard',
+  'form:finish', 'form:quick', 'form:weigh', 'form:paste', 'form:bp', 'form:waist']);
+const lastTap = {};
+// The key is the button itself, so Log on two different meals in quick succession logs both.
+const repeated = (kind, e, key = kind) => {
+  if (!ONCE.has(kind)) return false;
+  guardTap = tapAt;
+  return !L.firstTap(lastTap, key, e.timeStamp);
+};
+// The second tap of a double tap would act on whatever the first one put there, so near it, for 600 ms, a tap starts no drag, opens no keyboard and clicks nothing.
+const ghost = (e) => e.isTrusted && L.sameTap(guardTap, e.timeStamp, e.clientX, e.clientY);
+document.addEventListener('pointerdown', (e) => { if (ghost(e)) e.stopPropagation(); }, true);
+document.addEventListener('mousedown', (e) => { if (ghost(e)) e.preventDefault(); }, true);
+
 document.addEventListener('click', (e) => {
+  if (ghost(e)) {
+    e.preventDefault();
+    return;
+  }
+  const press = pressAt;
+  pressAt = null;
+  if (press && e.target === document.documentElement) {
+    // A press made during a slide sends its click to the page root; it goes where the press and release both were.
+    const up = document.elementFromPoint(e.clientX, e.clientY);
+    let el = document.elementFromPoint(...press);
+    while (el && !el.contains(up)) el = el.parentElement;
+    tapAt = e.isTrusted && e.detail ? { t: e.timeStamp, x: e.clientX, y: e.clientY } : null;
+    resending = true; // the re-sent click keeps this real tap's place for the double-tap guard
+    el?.dispatchEvent(new MouseEvent('click', e));
+    resending = false;
+    return;
+  }
+  if (!resending) tapAt = e.isTrusted && e.detail ? { t: e.timeStamp, x: e.clientX, y: e.clientY } : null; // a key press or a script's click() has no place
   const tipEl = e.target.closest?.('[data-tip]');
   if (tipEl) showTip(tipEl, e);
   else hideTip();
@@ -2248,7 +2496,7 @@ document.addEventListener('click', (e) => {
   const fn = ACT[el.dataset.act];
   if (fn) {
     e.preventDefault();
-    fn(el);
+    if (!repeated(el.dataset.act, e, Object.values(el.dataset).join())) fn(el);
   }
 });
 document.addEventListener('change', (e) => {
@@ -2259,6 +2507,8 @@ document.addEventListener('submit', (e) => {
   const f = e.target.closest('form[data-form]');
   if (!f) return;
   e.preventDefault();
+  // A form whose button is still busy with a passcode takes no second submit.
+  if (f.querySelector('[aria-busy="true"]') || repeated(`form:${f.dataset.form}`, e)) return;
   SUBMIT[f.dataset.form]?.(f);
 });
 document.addEventListener('input', (e) => {
@@ -2303,7 +2553,8 @@ if (state.profile && L.applyHolds(state, todayISO()).length) save();
 if (state.active) ui.session = { date: state.active.date, id: state.active.id };
 render(true);
 if (state.profile && state.seenVersion < APP_VERSION) {
+  const seen = state.seenVersion;
   state.seenVersion = APP_VERSION;
   save();
-  showSheet(sheetChanges());
+  showSheet(sheetChanges(seen));
 }

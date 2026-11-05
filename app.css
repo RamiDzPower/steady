@@ -22,7 +22,8 @@
   --fuel-tile: #b4461a;
   --water-tile: #1c5cab;
   --effort-tile: #0f7a54;
-  --gray-tile: #8e8e93;
+  --effort-tile-num: #0f7a54; /* the one tile with white digits on it needs 4.5:1; the others hold icons or large text, which need 3:1 */
+  --gray-tile: #747479; /* white text on it is 4.6:1, as the plan's tiles hold numbers */
   --danger: #d70015;
   --switch-on: #34c759;
   --glass: rgb(250 250 252 / 0.72);
@@ -44,7 +45,7 @@
     --fill: rgb(118 118 128 / 0.24);
     --fill-2: rgb(120 120 128 / 0.36);
     --label: #ffffff;
-    --label-2: #98989f;
+    --label-2: #9f9fa5; /* 4.5:1 or more on the sheet's raised greys too */
     --label-3: #6b6b70;
     --sep: #38383a;
     --inverse: #000000;
@@ -54,16 +55,18 @@
     --fuel-ink: #f29a70;
     --water-ink: #86b6ef;
     --effort-ink: #5bd3a6;
-    --fuel-tile: #d95926;
+    --fuel-tile: #c24f21; /* deeper than the marks, so white text on a tile reaches 4.5:1 */
     --water-tile: #3987e5;
     --effort-tile: #199e70;
+    --effort-tile-num: #14825c;
     --gray-tile: #636366;
     --danger: #ff6961;
     --switch-on: #30d158;
     --glass: rgb(30 30 32 / 0.72);
     --glass-strong: rgb(38 38 40 / 0.88);
     --glass-line: rgb(255 255 255 / 0.08);
-    --shadow-float: 0 10px 30px rgb(0 0 0 / 0.5);
+    /* A shadow barely shows on black, so the floating bars also get a lit top edge. */
+    --shadow-float: inset 0 0.5px 0 rgb(255 255 255 / 0.16), 0 10px 30px rgb(0 0 0 / 0.5);
   }
   /* In dark mode iOS lifts sheets onto the elevated surfaces, so they stand off the black page. */
   dialog#sheet { --bg: #1c1c1e; --cell: #2c2c2e; --cell-2: #333336; }
@@ -92,16 +95,22 @@ body {
   line-height: 1.29;
   -webkit-font-smoothing: antialiased;
   padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); /* landscape: main centres between the notch and the far edge */
   -webkit-tap-highlight-color: transparent;
 }
 main { max-width: 600px; margin: 0 auto; padding: calc(10px + env(safe-area-inset-top)) 16px 24px; outline: none; }
+main:focus-visible { outline: none; } /* script focuses main for screen readers; the global ring would outline the page */
 h1, h2, h3 { font-weight: 700; text-wrap: balance; }
 p { margin: 0; text-wrap: pretty; }
+/* No single word left alone on the last line of a list item or a row. */
+li, .cell-sub, .cell-value { text-wrap: pretty; }
 ul, ol { margin: 0; }
 strong { font-weight: 600; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .num { font-family: var(--font-round); font-variant-numeric: tabular-nums; }
+/* Numbers that change in place in the body font: equal-width figures, so the text beside them does not shift. */
+.ring-of, .cell-value, .rest, #tip, #toast { font-variant-numeric: tabular-nums; }
 .dim { color: var(--label-2); }
 .i { display: block; width: 20px; height: 20px; fill: currentColor; flex: none; }
 :focus-visible { outline: 3px solid var(--water); outline-offset: 2px; border-radius: 10px; }
@@ -115,10 +124,10 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .nav-text { min-width: 0; }
 .nav-cap { font-size: 0.76rem; font-weight: 600; color: var(--label-2); margin-bottom: 2px; }
 .nav-title { margin: 0; font-size: 2rem; line-height: 1.2; letter-spacing: -0.02em; overflow-wrap: anywhere; }
-.nav-actions { display: flex; gap: 8px; padding-bottom: 5px; flex: none; }
+.nav-actions { display: flex; gap: 10px; padding-bottom: 5px; flex: none; } /* 10 px, so two icon buttons' 44 px taps meet without overlapping */
 .navbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 25;
-  height: calc(44px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top);
+  height: calc(44px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   display: grid; place-items: center;
   background: var(--glass); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 0.5px solid var(--glass-line);
@@ -132,8 +141,12 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 
 /* ---- Week strip ---- */
 .week-strip { display: grid; grid-template-columns: 26px repeat(7, 1fr) 26px; align-items: center; margin: 0 -6px 16px; }
-.strip-nav { appearance: none; border: 0; background: none; height: 44px; display: grid; place-items: center; color: var(--label-2); cursor: pointer; }
+.strip-nav { appearance: none; border: 0; background: none; position: relative; height: 44px; display: grid; place-items: center; color: var(--label-2); cursor: pointer; }
 .strip-nav .i { width: 16px; height: 16px; }
+/* Nine controls share the row, so an arrow cannot take 44 px across without its day: it takes the gutter and the strip's full height instead. */
+.strip-nav::after { content: ""; position: absolute; inset: -12px 0; }
+.strip-nav:first-child::after { left: -6px; } /* the strip's -6px margin puts this at the screen edge; further would scroll the page at 320 px */
+.strip-nav:last-child::after { right: -6px; }
 .day { appearance: none; border: 0; background: none; display: grid; justify-items: center; gap: 3px; padding: 4px 0; cursor: pointer; }
 .dow { font-size: 0.65rem; font-weight: 600; color: var(--label-2); }
 .dn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: 1.06rem; font-weight: 600; transition: background-color 0.2s ease; }
@@ -161,12 +174,27 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .ring.effort .ring-track { stroke: var(--effort-soft); }
 .ring.effort .ring-arc, .ring.effort .ring-icon { stroke: var(--effort); color: var(--effort); }
 .ring.effort .ring-over { stroke: color-mix(in srgb, var(--effort) 70%, #000); }
+/* Mixed with black, the over-target arc falls under 3:1 on a dark card, so dark mode draws it in the lighter ink. */
+@media (prefers-color-scheme: dark) {
+  .ring.fuel .ring-over { stroke: var(--fuel-ink); }
+  .ring.water .ring-over { stroke: var(--water-ink); }
+  .ring.effort .ring-over { stroke: var(--effort-ink); }
+  .mb-fuel-over { fill: var(--fuel-ink); }
+}
 .ring-icon { stroke: none !important; }
 .ring figcaption { display: grid; gap: 1px; }
 .ring-name { font-size: 0.76rem; font-weight: 600; color: var(--label-2); }
 .ring-val .num { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.01em; }
 .ring-val .unit { font-size: 0.76rem; font-weight: 600; color: var(--label-2); }
 .ring-of { font-size: 0.7rem; color: var(--label-2); }
+/* Clipped above and below, so a rolling digit shows only once it rises into the line. */
+.rolling { display: inline-block; clip-path: inset(0 -2px); }
+.roll { display: inline-block; animation: roll-up 0.3s var(--ease) both; }
+.roll:nth-of-type(2) { animation-delay: 0.1s; }
+.roll:nth-of-type(3) { animation-delay: 0.2s; }
+.roll:nth-of-type(4) { animation-delay: 0.3s; }
+.roll:nth-of-type(5) { animation-delay: 0.4s; }
+@keyframes roll-up { from { transform: translateY(100%); } }
 .mini-bars { display: grid; gap: 12px; margin: 16px 6px 0; padding-top: 14px; border-top: 0.5px solid var(--sep); }
 .mini { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 6px 8px; }
 .mini-label { font-size: 0.88rem; font-weight: 600; }
@@ -176,19 +204,22 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .minibar { display: block; width: 100%; height: 6px; }
 .mb-track { fill: var(--fill); }
 .mb-fuel { fill: var(--fuel); }
+.mb-fuel-over { fill: color-mix(in srgb, var(--fuel) 70%, #000); } /* as the Food ring's over arc */
 .mb-water { fill: var(--water); }
 .mb-effort { fill: var(--effort); }
+.mb-gray { fill: var(--label-2); }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 4px; }
 .tile-card { display: grid; align-content: start; gap: 2px; background: var(--cell); border-radius: var(--r-card); padding: 14px 16px; }
 .tile-num { font-size: 1.65rem; font-weight: 700; line-height: 1.15; text-wrap: balance; }
-.tile-label { font-size: 0.82rem; font-weight: 600; line-height: 1.25; }
-.tile-sub { font-size: 0.76rem; color: var(--label-2); }
+.tile-label { font-size: 0.82rem; font-weight: 600; line-height: 1.25; text-wrap: balance; }
+.tile-sub { font-size: 0.76rem; color: var(--label-2); text-wrap: balance; }
 .tile { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: #fff; background: var(--gray-tile); }
 .tile .i { width: 18px; height: 18px; }
 .tile .num { font-size: 0.88rem; font-weight: 700; }
 .tile.fuel, .tile.warn, .tile.hot { background: var(--fuel-tile); }
 .tile.water { background: var(--water-tile); }
 .tile.effort { background: var(--effort-tile); }
+.tile.effort:has(.num) { background: var(--effort-tile-num); }
 .tile.gray, .tile.info { background: var(--gray-tile); }
 .tile-lg { width: 46px; height: 46px; border-radius: 12px; }
 .tile-lg .i { width: 26px; height: 26px; }
@@ -210,9 +241,11 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .group-head .group-label { margin: 0; }
 .group-head .icon-btn { width: 28px; height: 28px; z-index: 1; }
 .group-head .icon-btn::after { inset: -8px; }
-.section-foot { margin: 8px 16px 0; font-size: 0.76rem; line-height: 1.38; color: var(--label-2); }
+.section-foot { margin: 8px 16px 12px; font-size: 0.76rem; line-height: 1.38; color: var(--label-2); }
 .lede { margin: 0 4px 12px; font-size: 1rem; line-height: 1.38; }
 .group { --inset: 16px; background: var(--cell); border-radius: var(--r-group); overflow: hidden; margin: 0 0 4px; }
+/* A block right after a group keeps the 12 px gap cards keep; the low specificity lets .danger-group keep its 28 px. */
+:where(.group, form) + :is(.group, .card, .callout) { margin-top: 12px; }
 /* The group clips whatever crosses its edge, so a focused row draws its ring inside itself. */
 .group .cell:focus-visible { outline-offset: -3px; }
 .group:has(.tile), .group:has(.date-badge) { --inset: 58px; }
@@ -226,7 +259,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
   content: ""; position: absolute; top: 0; right: 0; left: var(--inset); border-top: 0.5px solid var(--sep);
 }
 .cell-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.cell-title { font-size: 1rem; line-height: 1.29; overflow-wrap: anywhere; }
+.cell-title { font-size: 1rem; line-height: 1.29; overflow-wrap: anywhere; text-wrap: balance; }
 .cell-sub { font-size: 0.82rem; line-height: 1.3; color: var(--label-2); overflow-wrap: anywhere; }
 .cell-text { font-size: 0.94rem; line-height: 1.36; }
 .block-cell .cell-text { margin-top: 4px; }
@@ -241,6 +274,9 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 .burn-card .accessory.done { color: var(--effort-ink); } /* its Using it is text, which needs 4.5:1 */
 .as-link { appearance: none; border: 0; background: none; padding: 0; margin: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .cell-main.as-link { display: grid; gap: 2px; }
+/* A row's main button also takes the padding above and below it, so its tap is as tall as the row. */
+.cell > .as-link { position: relative; }
+.cell > .as-link::after { content: ""; position: absolute; inset: -10px 0; }
 .cell-button, .cell-action { cursor: pointer; transition: background-color 0.15s ease; }
 .cell-button:active, .cell-action:active { background: var(--fill); transition-duration: 0s; }
 .cell-action { gap: 12px; font-weight: 600; }
@@ -258,10 +294,11 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
   min-height: 44px; padding: 0 18px; border-radius: 999px;
   background: var(--fill); color: var(--label);
   font-size: 0.94rem; font-weight: 600; line-height: 1; cursor: pointer;
-  transition: transform 0.15s var(--ease), background-color 0.2s ease;
 }
 .btn .i { width: 16px; height: 16px; }
-.btn:active { transform: scale(0.97); }
+/* The tap covers the whole box: round ends and corners would cut the corners off a 44 px square on a narrow phone. */
+.btn, .tabs button, .rpe button { position: relative; }
+.btn::after, .tabs button::after, .rpe button::after { content: ""; position: absolute; inset: 0; }
 .btn:disabled { opacity: 0.4; cursor: default; transform: none; }
 .btn-sm { position: relative; min-height: 34px; padding: 0 14px; font-size: 0.88rem; }
 /* A small pill still takes a 44 px tall tap. */
@@ -280,20 +317,17 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
   appearance: none; border: 0; flex: none; position: relative;
   display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
   background: var(--fill); color: var(--label-2); cursor: pointer;
-  transition: transform 0.15s var(--ease);
 }
 .icon-btn::after { content: ""; position: absolute; inset: -5px; }
 .icon-btn .i { width: 15px; height: 15px; }
-.icon-btn:active { transform: scale(0.92); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .btn-start {
   appearance: none; border: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; height: 54px; margin: 16px 0 8px; border-radius: 16px;
   background: var(--label); color: var(--inverse); font-size: 1rem; font-weight: 600; cursor: pointer;
-  transition: transform 0.15s var(--ease);
 }
 .btn-start .i { width: 18px; height: 18px; }
-.btn-start:active { transform: scale(0.97); }
+.btn-start[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 .start-row { display: grid; gap: 8px; margin: 16px 0 4px; }
 .start-row .btn-start { margin: 0; }
 /* Segments that do not fit side by side, with large text on a narrow phone, go on to a second row. */
@@ -305,14 +339,18 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 /* A 44 px tall tap; the 6 px between rows keeps a second row's from covering the first. */
 .segmented button::after { content: ""; position: absolute; inset: -6px 0; }
 .segmented button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 3px 8px rgb(0 0 0 / 0.12), 0 3px 1px rgb(0 0 0 / 0.04); }
-.chips { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; margin: 0 -16px 12px; padding: 2px 16px; scrollbar-width: none; }
+/* The row clips at its padding, so the padding holds each chip's 44 px tall tap; the margins keep the chips in place. */
+.chips { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; margin: -4px -16px 8px; padding: 6px 16px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
+.chips + .section-head { margin-top: 24px; } /* the 28 px gap collapses with the row's margin, so it gives back the 4 px of padding */
 .chip-btn {
   appearance: none; border: 0; flex: none; display: inline-flex; align-items: center; gap: 6px;
   min-height: 36px; padding: 0 14px; border-radius: 999px; background: var(--cell);
   font-size: 0.88rem; font-weight: 600; color: var(--label); cursor: pointer;
 }
 .chip-btn .i { width: 16px; height: 16px; color: var(--label-2); }
+.chip-btn { position: relative; }
+.chip-btn::after { content: ""; position: absolute; inset: -4px 0; }
 .chip-btn[aria-pressed="true"] { background: var(--label); color: var(--inverse); }
 .chip-btn[aria-pressed="true"] .i { color: var(--inverse); }
 .chips.compact .chip-btn { background: var(--fill); }
@@ -334,11 +372,15 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 }
 .switch:checked { background: var(--switch-on); }
 .switch:checked::after { transform: translateX(20px); }
+/* A switch outside a tappable row, as in Reminders, still takes a 44 px tall tap. */
+.switch::before { content: ""; position: absolute; inset: -7px 0; }
 .switch-cell { cursor: pointer; }
+/* A transparent border is part of the tap but not of the fill, so the box takes 44 px and still looks 34 px tall; the margin keeps the row. */
 input.time {
-  flex: none; width: auto; min-height: 34px; padding: 4px 10px; border: 0; border-radius: 8px;
-  background: var(--fill); color: var(--label); font: 600 max(0.94rem, 16px) var(--font-round);
+  flex: none; width: auto; min-height: 44px; padding: 4px 10px; margin: -5px -6px; border: solid transparent; border-width: 5px 6px; border-radius: 14px / 13px;
+  background: var(--fill) padding-box; color: var(--label); font: 600 max(0.94rem, 16px) var(--font-round);
 }
+input.time:focus-visible { outline-offset: -4px; } /* the ring hugs the fill, not the border */
 .round-check {
   appearance: none; -webkit-appearance: none; flex: none; display: grid; place-items: center; margin: 0;
   width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--label-3); cursor: pointer;
@@ -367,16 +409,20 @@ input.time {
 .field:focus-within { background: var(--cell-2); }
 .unit { flex: none; font-size: 0.94rem; color: var(--label-2); }
 .field .unit { margin-left: auto; }
-.search { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; margin: 4px 0 12px; border-radius: 12px; background: var(--fill); color: var(--label-2); }
+/* As with input.time, a transparent border makes the tap 44 px tall around a 40 px fill. */
+.search { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; margin: 2px 0 10px; border: solid transparent; border-width: 2px 0; border-radius: 12px / 14px; background: var(--fill) padding-box; color: var(--label-2); }
 .search .i { width: 16px; height: 16px; }
 .search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--label); font: inherit; font-size: max(1rem, 16px); }
-input.grams { flex: none; width: 64px; padding: 6px 8px; border: 0; border-radius: 8px; background: var(--fill); color: var(--label); text-align: right; font: 600 max(0.94rem, 16px) var(--font-round); }
+/* The same transparent border as input.time: a 44 px tap around a 30 px fill. */
+input.grams { flex: none; width: 76px; padding: 6px 8px; margin: -7px -6px; border: solid transparent; border-width: 7px 6px; border-radius: 14px / 15px; background: var(--fill) padding-box; color: var(--label); text-align: right; font: 600 max(0.94rem, 16px) var(--font-round); }
+input.grams:focus-visible { outline-offset: -4px; } /* the ring hugs the fill, not the border */
 textarea { width: 100%; min-height: 110px; border: 0; background: none; outline: none; resize: vertical; color: var(--label); font: inherit; font-size: max(1rem, 16px); }
 details.plain summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 16px; list-style: none; font-weight: 600; cursor: pointer; }
 details.plain summary::-webkit-details-marker { display: none; }
 details.plain summary .i { width: 14px; height: 14px; transition: transform 0.2s var(--ease); }
 details.plain[open] summary .i { transform: rotate(90deg); }
-.link { color: var(--label); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.link { position: relative; color: var(--label); font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.link::after { content: ""; position: absolute; inset: -14px -6px; } /* the small text link takes a 44 px tall tap */
 
 /* ---- Today ---- */
 .water-card { padding: 12px; }
@@ -386,7 +432,9 @@ details.plain[open] summary .i { transform: rotate(90deg); }
 .weigh { display: flex; align-items: center; gap: 8px; padding: 20px 12px; }
 .weigh .btn { padding: 0 12px; }
 /* The number shrinks with the room the buttons leave, so a narrow phone or a large text size never cuts off its decimal. */
-.weigh-num { flex: 1; min-width: 0; container-type: inline-size; display: flex; align-items: baseline; justify-content: center; gap: 4px; cursor: text; }
+.weigh-num { flex: 1; min-width: 0; container-type: inline-size; display: flex; align-items: baseline; justify-content: center; gap: 4px; cursor: text; position: relative; z-index: 0; }
+/* Behind the number, so the tap is 44 px tall when the number shrinks and a tap on the digits still places the caret. */
+.weigh-num::before { content: ""; position: absolute; z-index: -1; left: 0; right: 0; top: calc(50% - 22px); height: 44px; }
 /* It stops at 16 px, below which iOS zooms in on the box, so with large text on a narrow phone the steps go under it. */
 form[data-form="weigh"] { container-type: inline-size; }
 @container (width < 10em) {
@@ -408,7 +456,7 @@ form[data-form="weigh"] { container-type: inline-size; }
 .date-badge span:first-child { font-size: 0.7rem; font-weight: 600; color: var(--label-2); }
 .date-badge .num { font-size: 1.3rem; font-weight: 700; }
 .date-badge.now .num { color: var(--effort-ink); }
-.line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 2px 0; }
+.line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 2px 0; } /* stacked sessions touch, so each line is a whole tap tall */
 .line + .line { border-top: 0.5px solid var(--sep); }
 .line-name { flex: 1; min-width: 0; font-size: 1rem; }
 .line-meta { font-size: 0.82rem; color: var(--label-2); }
@@ -427,7 +475,7 @@ form[data-form="weigh"] { container-type: inline-size; }
 .phase .timer { font-size: 3rem; }
 .phase-next { font-size: 0.82rem; color: var(--label-2); }
 .rest {
-  position: fixed; z-index: 18; left: 16px; right: 16px; bottom: calc(96px + env(safe-area-inset-bottom));
+  position: fixed; z-index: 18; left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); bottom: calc(96px + env(safe-area-inset-bottom));
   max-width: 568px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 14px 12px 18px; border-radius: 24px;
   background: var(--glass-strong); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
@@ -447,9 +495,9 @@ body:has(.rest:not([hidden])) { padding-bottom: calc(200px + env(safe-area-inset
 .ex-num { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--fill); font-size: 0.88rem; font-weight: 700; }
 .ex-name { margin: 0; font-size: 1.06rem; font-weight: 600; line-height: 1.25; }
 .ex-meta { margin-top: 2px; font-size: 0.82rem; color: var(--label-2); }
-/* The drawings are white line art on a transparent canvas: black in light mode, as they come in dark mode. */
+/* The drawings are white line art on a transparent canvas: black in light mode, and dimmed in dark mode so the white does not glare. */
 .ex-pic { display: block; width: 100%; max-width: 160px; height: auto; margin: 12px auto 0; filter: brightness(0); pointer-events: none; }
-@media (prefers-color-scheme: dark) { .ex-pic { filter: none; } }
+@media (prefers-color-scheme: dark) { .ex-pic { filter: brightness(0.85); } }
 .cue { margin: 12px 0 4px; font-size: 0.94rem; line-height: 1.38; }
 .ex-alt { font-size: 0.82rem; color: var(--label-2); }
 .ex-last { margin-top: 8px; font-size: 0.82rem; font-weight: 500; line-height: 1.35; color: var(--effort-ink); }
@@ -461,19 +509,23 @@ body:has(.rest:not([hidden])) { padding-bottom: calc(200px + env(safe-area-inset
 .setbtn {
   appearance: none; border: 0; position: relative; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
   background: var(--fill); color: var(--label); font-size: 1.06rem; font-weight: 700; cursor: pointer;
-  transition: transform 0.15s var(--ease), background-color 0.2s ease;
 }
 /* iOS only buzzes for a real tap on a switch, so a label over each set button takes the tap and passes it to a hidden one. */
-.tap { position: absolute; inset: 0; border-radius: inherit; }
+.tap { position: absolute; inset: 0; } /* square, so the corners round the 46 px disc count as part of the tap */
 .tap input { position: absolute; width: 1px; height: 1px; margin: 0; visibility: hidden; }
 .setbtn .i { width: 20px; height: 20px; }
-.setbtn:active { transform: scale(0.92); }
 .setbtn[aria-pressed="true"] { background: var(--effort-tile); color: #fff; }
+/* Reduce Motion drops the drawing, which leaves the mark fully drawn. */
+.success { display: block; width: 64px; height: 64px; margin: 2px auto 16px; fill: none; stroke: var(--effort); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.success path { stroke-dasharray: 1 2; animation: draw 0.28s var(--ease) both; } /* a gap longer than the path leaves no round-cap dot before it draws */
+.success path + path { animation-duration: 0.19s; animation-delay: 0.28s; }
+@keyframes draw { from { stroke-dashoffset: 1; } }
 .rpe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 0 0 14px; }
 .rpe button { appearance: none; border: 0; min-height: 46px; border-radius: 12px; background: var(--cell); color: var(--label); font-size: 1.06rem; font-weight: 700; cursor: pointer; }
 .rpe button[aria-pressed="true"] { background: var(--label); color: var(--inverse); }
 .flash {
-  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; text-align: center;
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; text-align: center;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   background: var(--effort-tile); color: #fff; font: 700 2.6rem/1.15 var(--font-round); letter-spacing: -0.02em; cursor: pointer;
 }
 .flash.hard { background: var(--fuel-tile); }
@@ -500,11 +552,22 @@ ol.steps li::before {
 .cell-details > summary::-webkit-details-marker { display: none; }
 .cell-details > summary .accessory .i { transition: transform 0.2s var(--ease); }
 .cell-details[open] > summary .accessory .i { transform: rotate(90deg); }
+/* Only where the height can ease to auto does the chevron slow to match it; elsewhere the row opens at once. */
+@supports (interpolate-size: allow-keywords) {
+  @media (prefers-reduced-motion: no-preference) {
+    details { interpolate-size: allow-keywords; }
+    details::details-content { block-size: 0; overflow-y: clip; transition: block-size 0.35s var(--ease), content-visibility 0.35s allow-discrete; }
+    details[open]::details-content { block-size: auto; }
+    details.plain summary .i, .cell-details > summary .accessory .i { transition-duration: 0.35s; }
+  }
+}
 .details-body { padding: 0 16px 16px; }
 .thai { font-size: 1.3rem; }
 .sheet-list { max-height: 42dvh; overflow-y: auto; overscroll-behavior: contain; }
 
 /* ---- Progress and health ---- */
+/* A row measured against a target puts its bar on a line of its own, under the label and the numbers. */
+.meter-cell { flex-wrap: wrap; row-gap: 8px; }
 .chart { padding: 16px 12px 10px; }
 .chart-head { padding: 0 4px 8px; }
 .chart-head h3 { margin: 0; font-size: 0.82rem; font-weight: 600; color: var(--label-2); }
@@ -539,26 +602,27 @@ ol.steps li::before {
 .l-pred { fill: none; stroke: var(--fuel); stroke-width: 2; stroke-dasharray: 2 4; stroke-linecap: round; }
 /* The forecast carries the trend on in its own ink, dashed, so it stands apart from the grey plan line where the two meet. */
 .l-pace { fill: none; stroke: var(--label); stroke-width: 2; stroke-dasharray: 6 4; }
-.tiles + .card { margin-top: 8px; }
-.chart + .section-foot { margin-bottom: 16px; }
+.tiles + .card { margin-top: 12px; }
 .milestones { --inset: 50px; }
 .milestones .accessory .i { width: 22px; height: 22px; }
 /* Not yet earned: an empty ring the size of the check's disc, like the shopping list's open ticks. */
 .open-mark { width: 18px; height: 18px; margin: 2px; border-radius: 50%; border: 1.5px solid var(--label-3); }
 .hit { fill: transparent; cursor: pointer; }
-.burn-card p, .bp-card p { margin: 6px 4px 0; font-size: 0.94rem; line-height: 1.38; }
-.bp-card .chart-big { margin: 0 4px; }
+.burn-card p, .bp-card p { margin: 6px 0 0; font-size: 0.94rem; line-height: 1.38; }
+.bp-card .chart-big { margin: 0; }
+.burn-card .chart-head { padding-inline: 0; }
 .table-card { padding: 6px 0; }
 .scroll-x { overflow-x: auto; }
 .tbl { min-width: 100%; border-collapse: collapse; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
 .tbl th, .tbl td { padding: 9px 12px; border-bottom: 0.5px solid var(--sep); text-align: right; white-space: nowrap; vertical-align: top; }
 .tbl tr:last-child td { border-bottom: 0; }
 .tbl th { font-size: 0.76rem; font-weight: 600; color: var(--label-2); }
-.tbl th:first-child, .tbl td:first-child { text-align: left; }
+.tbl th:first-child, .tbl td:first-child { padding-left: 16px; text-align: left; }
 .lab-v { display: block; font-size: 1.06rem; font-weight: 600; color: var(--label); }
 .lab-v small { font-size: 0.76rem; font-weight: 500; color: var(--label-2); }
 .months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 12px; }
 .month { position: relative; cursor: pointer; }
+.month::after { content: ""; position: absolute; inset: -4px; } /* a 44 px tall tap that meets its neighbours halfway across the 8 px gaps */
 .month input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .month span { display: grid; place-items: center; min-height: 36px; border-radius: 10px; background: var(--fill); font-size: 0.82rem; font-weight: 600; transition: background-color 0.15s ease; }
 .month input:checked + span { background: var(--fuel-tile); color: #fff; }
@@ -578,7 +642,7 @@ ol.steps li::before {
 /* ---- Tab bar, sheets, tooltip, toast, update bar ---- */
 .tabs {
   position: fixed; z-index: 30; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom));
-  transform: translateX(-50%); width: min(calc(100% - 24px), 520px);
+  transform: translateX(-50%); width: min(calc(100% - 2 * max(12px, env(safe-area-inset-left), env(safe-area-inset-right))), 520px);
   display: grid; grid-template-columns: repeat(5, 1fr); padding: 5px; border-radius: 999px;
   background: var(--glass); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
@@ -590,15 +654,17 @@ ol.steps li::before {
 }
 .tabs .i { width: 24px; height: 24px; }
 .tabs button[aria-current="page"] { color: var(--label); background: var(--fill); }
-/* A transition rather than keyframes, so a sheet can be caught and dragged while it is still moving.
+/* A transition rather than keyframes, so a sheet can be caught and dragged while it is still coming up.
    It leaves the way it came in: down, with the dimming fading out. */
 dialog#sheet {
-  width: 100%; max-width: 600px; max-height: 92dvh; margin: auto auto 0; padding: 0; border: 0;
+  /* capped and centred clear of a landscape notch, so the content inside keeps its 16 px padding */
+  width: 100%; max-width: min(600px, calc(100% - 2 * max(env(safe-area-inset-left), env(safe-area-inset-right)))); max-height: 92dvh; margin: auto auto 0; padding: 0; border: 0;
   border-radius: 24px 24px 0 0; background: var(--bg); color: var(--label);
   transition: transform 0.38s var(--ease);
 }
 @starting-style { dialog#sheet[open] { transform: translateY(100%); } }
-dialog#sheet.closing { transform: translateY(100%) !important; }
+/* On its way down it takes no taps, so a second tap on Save or Add cannot land on it. */
+dialog#sheet.closing { transform: translateY(100%) !important; pointer-events: none; }
 dialog#sheet::backdrop { background: rgb(0 0 0 / 0.32); transition: opacity 0.3s ease; animation: fade-in 0.25s ease; }
 dialog#sheet.closing::backdrop { opacity: 0; }
 @keyframes fade-in { from { opacity: 0; } }
@@ -606,10 +672,10 @@ dialog#sheet.closing::backdrop { opacity: 0; }
 /* The grabber row and the title row are the drag handle; the browser leaves those touches to the script. */
 .grabber { position: relative; height: 22px; margin: 0 -16px; touch-action: none; }
 .grabber::before { content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--label-3); opacity: 0.5; }
-.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding-top: 6px; touch-action: none; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; padding: 6px 4px 0; touch-action: none; }
 .sheet-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.015em; }
 .sheet .segmented { margin-bottom: 10px; }
-.sheet .chips { margin-bottom: 8px; }
+.sheet .chips { margin-bottom: 2px; }
 .form-error { color: var(--danger); overflow-wrap: anywhere; }
 #tip {
   position: fixed; z-index: 45; max-width: 230px; padding: 8px 12px; border-radius: 12px; pointer-events: none;
@@ -619,11 +685,11 @@ dialog#sheet.closing::backdrop { opacity: 0; }
 }
 /* Centred by its margins between two insets, not by left: 50%, which would cap its shrink-to-fit width at half the screen. */
 #toast {
-  position: fixed; left: 16px; right: 16px; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 40;
+  position: fixed; left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 40;
   display: flex; align-items: center; gap: 12px; width: fit-content; max-width: calc(100vw - 32px); margin: 0 auto; padding: 12px 18px; border-radius: 999px;
   background: var(--glass-strong); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
-  color: var(--label); font-size: 0.88rem; font-weight: 600;
+  color: var(--label); font-size: 0.88rem; font-weight: 600; text-wrap: balance;
   opacity: 0; pointer-events: none; transform: translateY(8px);
   transition: opacity 0.2s ease, transform 0.3s var(--ease);
 }
@@ -631,26 +697,73 @@ dialog#sheet.closing::backdrop { opacity: 0; }
 #toast.has-btn { pointer-events: auto; padding: 8px 8px 8px 18px; }
 .toast-undo { background: var(--label); color: var(--inverse); }
 .update {
-  position: fixed; left: 12px; right: 12px; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 35;
+  position: fixed; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 35;
   max-width: 536px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 8px 8px 8px 18px; border-radius: 999px;
   background: var(--glass-strong); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float); font-size: 0.88rem; font-weight: 600;
 }
 .update .btn { background: var(--label); color: var(--inverse); }
+/* Over the rest or hold bar they would hide its Skip or Done and take taps meant for it, so they sit 8 px above it; app.js measures the bar. */
+body:has(.rest:not([hidden])) :is(#toast, .update) { bottom: calc(104px + var(--rest-h, 124px) + env(safe-area-inset-bottom)); }
+
+/* ---- Continuous corners, as on iOS, where the browser has corner-shape (Safari 27.3 and Chrome 139 on) ----
+   A squircle hugs its corner more than a circle does, so each radius grows by about 1.7 to look the same size; pills and circles stay round. */
+@supports (corner-shape: squircle) {
+  :root { --r-group: 34px; --r-card: 37px; }
+  .card, .tile-card, .callout, .group, .tile, .app-icon, .btn-start, .segmented, .segmented button, .rpe button, .month span, dialog#sheet { corner-shape: squircle; }
+  .tile { border-radius: 14px; }
+  .tile-lg, .rpe button { border-radius: 20px; }
+  .app-icon { border-radius: 34px; }
+  .btn-start { border-radius: 27px; }
+  .segmented, .month span { border-radius: 17px; }
+  .segmented button { border-radius: 14px; }
+  dialog#sheet { border-radius: 40px 40px 0 0; }
+}
+
+/* ---- Push, pop and the edge swipe back ---- */
+/* The bars hold still over a slide; a hidden one gets no name, as Chrome draws that as a dark box. */
+.navbar.on { view-transition-name: navbar; }
+.tabs { view-transition-name: tabs; }
+#toast.show { view-transition-name: toast; }
+.update { view-transition-name: update; }
+/* The title bar waits until the screen lands, so one screen's title never shows over the other. */
+html[data-slide] .navbar { opacity: 0; transition: none; }
+body:has(> .under) .navbar { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-slide]::view-transition-old(root), html[data-slide]::view-transition-new(root) { animation: 0.35s var(--ease) both; mix-blend-mode: normal; }
+  html[data-slide]::view-transition-image-pair(root) { background: #000; } /* what the screen behind dims towards */
+  html[data-slide="push"]::view-transition-old(root) { animation-name: to-behind; }
+  html[data-slide="push"]::view-transition-new(root) { animation-name: from-right; }
+  html[data-slide="pop"]::view-transition-old(root) { animation-name: to-right; z-index: 1; }
+  html[data-slide="pop"]::view-transition-new(root) { animation-name: from-behind; }
+}
+@keyframes from-right { from { transform: translateX(100%); } }
+@keyframes to-right { to { transform: translateX(100%); } }
+@keyframes to-behind { to { transform: translateX(-30%); opacity: 0.9; } }
+@keyframes from-behind { from { transform: translateX(-30%); opacity: 0.9; } }
+/* On a session the script gets sideways drags, so one from the left edge can pull it back; zoomed in, they pan the view as anywhere else. */
+:root:has(#main > .pushed):not([data-zoomed]) { touch-action: pan-y pinch-zoom; }
+/* The screen behind an edge swipe, clipped to the gap the session leaves. */
+.under { position: fixed; inset: 0; z-index: 20; overflow: hidden; background: var(--bg); will-change: transform; }
+.under > main { will-change: transform; }
+.under-dim { position: absolute; inset: 0; background: #000; will-change: opacity; }
+/* The moving session widens the page, and a clip on body or html goes to the viewport, which clips nothing. So #main spans the screen, with the column's gutters as padding, and clips there. */
+body:has(> .under) #main { max-width: none; margin: 0; padding-inline: max(16px, calc((100% - 600px) / 2 + 16px)); overflow-x: clip; }
 
 /* ---- Press feedback ----
    It lands on touch-down: text controls dim at once and fade back on release, filled ones shrink a little. */
 .back, .strip-nav, .as-link, .segmented button { transition: opacity 0.2s ease; }
 .back:active, .strip-nav:active, .as-link:active, .segmented button:active, .tabs button:active { opacity: 0.55; transition-duration: 0s; }
-.chip-btn { transition: transform 0.15s var(--ease); }
-.chip-btn:active, .round-check:active { transform: scale(0.95); }
+.btn, .btn-start, .icon-btn, .setbtn, .chip-btn { transition: transform 0.2s cubic-bezier(0.33, 1, 0.68, 1), background-color 0.2s ease; }
+:is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn):active:not(:disabled) { transform: scale(0.97); transition-duration: 0.1s, 0.2s; transition-timing-function: var(--ease), ease; }
+.round-check:active { transform: scale(0.95); }
 .day:not(.sel):active .dn { background: var(--fill); transition-duration: 0s; }
 
 /* Reduce Motion keeps fades and colour changes, as iOS does, and drops anything that slides, scales or spins. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-property: opacity, color, background-color, border-color !important; animation: none !important; }
-  .btn:active, .btn-start:active, .icon-btn:active, .setbtn:active, .chip-btn:active, .round-check:active { transform: none; }
+  :is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn):active:not(:disabled), .round-check:active { transform: none; }
   dialog#sheet { transition: opacity 0.2s ease !important; }
   dialog#sheet.closing { transform: none !important; opacity: 0; }
   @starting-style { dialog#sheet[open] { transform: none; opacity: 0; } }

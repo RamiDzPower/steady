@@ -2,7 +2,8 @@
 // Run it in the page: agent-browser eval "$(cat tools/check-overflow.js)" (see tools/README.md). It needs a profile,
 // and it saves a strength session to reach the finish and summary sheets, then removes that log, unless a session
 // is already running: that one it leaves alone, as saving or starting another would end it. Clicks render
-// synchronously, so it never waits on a timer, which a background tab would slow to about one a second.
+// synchronously, so it never waits on a timer, which a background tab would slow to about one a second. That is
+// why it turns off view transitions, which would draw a session's push and pop a frame later.
 (async () => {
   const W = document.documentElement.clientWidth;
   const running = !!JSON.parse(localStorage.getItem('steady.v1') || 'null')?.active;
@@ -23,6 +24,8 @@
     });
     const s = $('dialog[open] .sheet');
     if (s && s.scrollWidth > s.clientWidth) where.unshift(`\n    the sheet scrolls sideways: ${s.scrollWidth} of ${s.clientWidth} px`);
+    // Pseudo-element tap areas are not elements, but they still widen the page.
+    if (document.documentElement.scrollWidth > W) where.unshift(`\n    the page scrolls sideways: ${document.documentElement.scrollWidth} of ${W} px`);
     out.push(`${where.length ? 'OVERFLOW' : 'ok      '} ${label} (page ${document.documentElement.scrollWidth} of ${W} px)${where.join('')}`);
   };
   const click = (sel) => {
@@ -58,6 +61,7 @@
   if (clip) clip.readText = clip.writeText = refuse;
   navigator.share = refuse; // so Share the list falls back to its copy sheet instead of opening the share sheet
   window.confirm = () => true;
+  document.startViewTransition = undefined;
   try {
     shut();
     click('[data-tab=today]'); check('today');
@@ -128,6 +132,7 @@
   } finally {
     if (clip) { delete clip.readText; delete clip.writeText; }
     delete navigator.share;
+    delete document.startViewTransition;
     window.confirm = confirmWas;
   }
   return out.join('\n');

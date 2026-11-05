@@ -919,6 +919,29 @@ export async function decryptJson(file, pass) {
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
+// Which characters of a new number roll in: the digits that differ from the old number in the same place counted from the right.
+export const rollMask = (was, now) => [...now].map((c, i) => /\d/.test(c) && was[was.length - now.length + i] !== c);
+
+// ---- Taps ----
+// A one-shot action tapped again within ms of the last tap is a double tap, not a second request, so it should not run.
+// Every entry newer than the one the user last saw, newest first; with none, the latest, as the More row opens it too.
+export function changesSince(changes, seen) {
+  const fresh = changes.filter((c) => c.version > seen);
+  return fresh.length ? fresh : changes.slice(0, 1);
+}
+export function firstTap(last, key, now, ms = 600) {
+  const repeat = now - (last[key] ?? -Infinity) < ms;
+  last[key] = now;
+  return !repeat;
+}
+// The second tap of a double tap lands where the first one did, on whatever the first one put there, so only time and place tell it.
+export function sameTap(first, t, x, y, ms = 600, px = 24) {
+  return !!first && t - first.t < ms && Math.hypot(x - first.x, y - first.y) < px;
+}
+// The stretch of the x axis each chart point answers taps on: out to the midpoints with its neighbours, at most reach either way.
+export function tapSpans(xs, reach, lo, hi) {
+  return xs.map((x, i) => [Math.max(lo, x - reach, i ? (xs[i - 1] + x) / 2 : lo), Math.min(hi, x + reach, i < xs.length - 1 ? (x + xs[i + 1]) / 2 : hi)]);
+}
 
 // ---- Imports ----
 const num = (v, lo, hi) => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null);

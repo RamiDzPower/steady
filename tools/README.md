@@ -40,6 +40,14 @@ agent-browser eval "$(cat "$REPO/tools/check-overflow.js")" | sed 's/\\n/\n/g'
 
 `agent-browser eval` prints the report as one quoted string, and the `sed` splits it into lines. The check opens every screen and sheet a tap can reach and gives a line for each: `ok`, or `OVERFLOW` with up to three elements that stick out of the viewport and a note when a sheet scrolls sideways. Only the rows of chips and the weekly table may run past the edge, because they scroll sideways on purpose. `MISSING` means a button it looks for is not on the page. In the paste sheet it also sends a bad paste, which changes nothing, then makes the clipboard hand over the same bad paste; `NO ERROR` means the message did not show inside the sheet. It saves a strength session to reach the finish and summary sheets, then removes that log again. When a session is already running it skips those two sheets and says so, because saving or starting another session would end the one running. It also stops Share the list from opening the share sheet so the copy sheet shows instead. It skips the setup screen and the passcode sheet for a protected backup. When you add a sheet, add a line for it.
 
+## Check tap targets
+
+```sh
+agent-browser eval "$(cat "$REPO/tools/check-targets.js")" | sed 's/\\n/\n/g'
+```
+
+It visits most of the screens and sheets the overflow check visits, plus the tab bar and the rest bar, and for every control checks 144 points spread over a 44 by 44 px box around its centre with `document.elementFromPoint`. A screen where every control keeps the whole box gets `ok`. `SHORT` lists the controls that lose part of it, grouped by kind, with the share the worst one keeps and where the rest goes: another control, which would take the tap, or nothing, where the tap would be lost. Chrome treats a point as the pixel to its right and below, so the box starts half a pixel further out on the left and top: a 44 px control passes and a 43 px one does not. Three things stay short: the chart bars and dots, which share the plot edge to edge, the week strip's arrows, which share one row with seven days, and the first or last row of a list, whose box corner falls outside the list's rounded corner. On a 320 px wide phone the strip's seven days are short as well: each is 36 px wide and keeps about 83% of the box, and the rest goes to the next day or an arrow. A 44 px row right under a line of text can also lose its top points to that text by half a pixel; the row itself is fine. Like the overflow check it saves a strength session and removes it again, unless a session is running. It turns off view transitions first, because a session's push or pop sends every hit to the page root for 0.35 s. It ends with a short pause, because Finish, Skip, the remove button and Share the list ignore a second tap within 600 ms. When you add a sheet, add a line for it here too.
+
 ## Drag the sheet with real input
 
 ```sh
@@ -47,6 +55,8 @@ zsh "$REPO/tools/check-sheet.sh" steady-test http://127.0.0.1:8765/
 ```
 
 It taps, drags, flicks, presses Escape and taps the dimmed page, and prints each result next to the one it should give.
+
+Real input meets the app's double tap guard. A tap that opens or closes a sheet, changes the screen or runs a one-shot action makes the app ignore the next 600 ms of taps within 24 px of it: no drag, no focus, no click. A script that taps the same spot again should wait 600 ms first. Clicks from `el.click()`, as in the two checks above, carry no place and pass.
 
 ## Emulate other media features
 

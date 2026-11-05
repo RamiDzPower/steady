@@ -185,12 +185,22 @@ test('the demo state prints when the tool is run through a link', () => {
   }
 });
 
+test('What is new shows every entry newer than the one seen, and the latest when there is none', () => {
+  const log = [{ version: 6, notes: ['c'] }, { version: 5, notes: ['b'] }, { version: 4, notes: ['a'] }];
+  assert.deepEqual(L.changesSince(log, 4).map((c) => c.version), [6, 5]); // updating from 4 straight to 6
+  assert.deepEqual(L.changesSince(log, 5).map((c) => c.version), [6]);
+  assert.deepEqual(L.changesSince(log, 0).map((c) => c.version), [6, 5, 4]);
+  assert.deepEqual(L.changesSince(log, 6).map((c) => c.version), [6]); // the More row
+});
+
 test('What is new and the shortcut steps follow the copy rules', () => {
-  assert.equal(APP_VERSION, 5);
-  assert.equal(CHANGES.length, 7);
+  assert.equal(APP_VERSION, 6);
+  assert.deepEqual(CHANGES.map((c) => c.version), [6, 5]); // newest first
+  assert.equal(CHANGES[0].notes.length, 6);
+  assert.equal(CHANGES[1].notes.length, 7);
   // A shortcut made for release 4 still pastes without an error, so What's new has to say it needs making again.
-  assert.match(CHANGES[0], /Steady Watch shortcut has new steps.*More, iPhone shortcuts/);
-  for (const s of [...CHANGES, ...SHORTCUT_IN]) assert.doesNotMatch(s, /[\u2013\u2014!]/, s); // no en or em dashes, no exclamation marks
+  assert.match(CHANGES[1].notes[0], /Steady Watch shortcut has new steps.*More, iPhone shortcuts/);
+  for (const s of [...CHANGES.flatMap((c) => c.notes), ...SHORTCUT_IN]) assert.doesNotMatch(s, /[\u2013\u2014!]/, s); // no en or em dashes, no exclamation marks
   assert.ok(SHORTCUT_IN.some((s) => /Local Only/.test(s)) && SHORTCUT_IN.some((s) => /yyyy-MM-dd/.test(s)));
   // Cardio Fitness can go weeks without a reading, so its search looks back 3 months for the latest one.
   assert.ok(SHORTCUT_IN.some((s) => /Cardio Fitness/.test(s) && /last 3 months/.test(s) && /Latest First/.test(s) && /Limit and set it to 1/.test(s)));
