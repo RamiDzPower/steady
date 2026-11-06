@@ -133,7 +133,9 @@
     }
     click('#main [data-act=food-sec][data-id=menu]');
 
-    click('[data-tab=progress]'); sample('progress: charts, 14 days');
+    click('[data-tab=progress]'); sample('progress: overview');
+    click('#main [data-act=progress-view][data-id=goals]'); sample('progress: goals');
+    click('#main [data-act=progress-view][data-id=charts]'); sample('progress: charts, 14 days');
     click('#main [data-act=range][data-id="28"]'); sample('progress: charts, 28 days');
     click('#main [data-act=range][data-id="14"]');
     click('#main [data-act=progress-view][data-id=health]'); sample('progress: health checks');

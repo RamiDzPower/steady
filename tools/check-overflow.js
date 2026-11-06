@@ -133,12 +133,14 @@
 
     // Progress opens on Overview: the streak, challenges, the grid by weeks and by months, records and the weight chart.
     click('[data-tab=progress]'); click('#main [data-act=progress-view][data-id=overview]'); check('progress: overview');
-    click('#main [data-act=challenges-toggle]'); check('progress: overview, challenges open');
     click('#main [data-act=heat-range][data-id=year]'); check('progress: overview, activity by year');
     click('#main [data-act=heat-metric][data-id=volume]'); check('progress: overview, volume');
     click('#main [data-act=heat-range][data-id="12w"]'); click('#main [data-act=heat-metric][data-id=time]');
-    for (const r of ['1M', '1Y', 'All']) { click(`#main [data-act=weight-range][data-id="${r}"]`); check(`progress: overview, weight ${r}`); }
     click('#main [data-act=progress-view][data-id=charts]'); check('progress: charts, 14 days');
+    for (const r of ['1M', '1Y', 'All']) { click(`#main [data-act=weight-range][data-id="${r}"]`); check(`progress: charts, weight ${r}`); }
+    click('#main [data-act=weight-table]'); check('progress: charts, weight table');
+    click('#main [data-act=progress-view][data-id=goals]'); check('progress: goals');
+    click('#main [data-act=progress-view][data-id=charts]');
     click('#main [data-act=range][data-id="28"]'); check('progress: charts, 28 days');
     click('#main [data-act=range][data-id="14"]');
     click('#main [data-act=progress-view][data-id=health]'); check('progress: health checks');

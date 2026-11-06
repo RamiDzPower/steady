@@ -560,8 +560,18 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 8;
+export const APP_VERSION = 9;
 export const CHANGES = [
+  {
+    version: 9,
+    notes: [
+      'Today starts with your three rings, a line saying what is left, and the reminders under them. Swipe a meal left to swap it; Eaten is now a quiet mark.',
+      'Progress opens on your weight with a small trend line. Charts holds the weight chart (with a table), Goals holds totals, challenges and milestones, and the views scroll sideways.',
+      'Wins such as the streak, badges and records use their own indigo, so orange only means food.',
+      'A running workout hides the tab bar. Schedule rows say which body parts a session works.',
+      'Drag a finger over the activity grid to read each day. Smaller type scale, stronger grey text in dark mode.',
+    ],
+  },
   {
     version: 8,
     notes: [

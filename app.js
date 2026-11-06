@@ -35,7 +35,7 @@ const CLOSE_BTN = `<button class="icon-btn" data-act="sheet-close" aria-label="C
 
 let state = load();
 const ui = {
-  screen: 'today', tab: 'today', date: todayISO(), week: null, food: 'menu', foodWeek: 'this', trainView: 'schedule', exQuery: '', exPart: 'All', progress: 'overview', weightRange: '3M', heatMetric: 'time', heatRange: '12w', chOpen: false, range: 14, reportDays: '91',
+  screen: 'today', tab: 'today', date: todayISO(), week: null, food: 'menu', foodWeek: 'this', trainView: 'schedule', exQuery: '', exPart: 'All', progress: 'overview', weightRange: '3M', weightTable: false, heatMetric: 'time', heatRange: '12w', range: 14, reportDays: '91',
   session: null, addSlot: 'lunch', portion: 1, rest: null, hold: null, phase: -1, persisted: false, onToday: true, updating: false, pendingFile: null,
 };
 let ticker = null;
@@ -119,7 +119,9 @@ function render(top = false) {
   $('#main').innerHTML = VIEWS[ui.screen]();
   rollRings();
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
-  $('.tabs').hidden = ui.screen === 'setup';
+  const bare = ui.screen === 'setup' || (ui.screen === 'session' && !!state.active); // a running workout gets the whole screen
+  $('.tabs').hidden = bare;
+  document.body.classList.toggle('no-tabs', bare);
   ui.onToday = ui.date === todayISO();
   if (ui.screen === 'session') startTicker();
   if (top) {
@@ -182,13 +184,14 @@ const sectionHead = (title, meta = '') => `<div class="section-head"><h2>${title
 const callout = (iconName, html, cls = '') => `<div class="callout ${cls}"><span class="tile ${cls || 'info'}">${icon(iconName)}</span><div class="callout-body">${html}</div></div>`;
 const foot = (html) => `<p class="section-foot">${html}</p>`;
 
-function ring(kind, name, value, target, valText, unit, ofText, iconName) {
+function ring(kind, name, value, target, valText, unit, ofText) {
   const r = 40, c = 2 * Math.PI * r;
   const f = target > 0 ? value / target : value > 0 ? 1 : 0;
   const arc = (frac, cls) => (frac > 0.001 ? `<circle class="${cls}" cx="50" cy="50" r="${r}" stroke-dasharray="${(c * frac).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 50 50)"/>` : '');
   return `<figure class="ring ${kind}">
-    <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}</svg>${icon(iconName, 'ring-icon')}</div>
-    <figcaption><span class="ring-name">${name}</span><span class="ring-val"><span class="num">${valText}</span><span class="unit"> ${unit}</span></span><span class="ring-of">${ofText}</span></figcaption>
+    <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}</svg>
+      <span class="ring-val"><span class="num">${valText}</span><span class="unit">${unit}</span></span></div>
+    <figcaption><span class="ring-name">${name}</span><span class="ring-of">${ofText}</span></figcaption>
   </figure>`;
 }
 // Kept per day, and over screens without rings, so a workout saved in a session still rolls in on Today.
@@ -245,22 +248,20 @@ function viewToday() {
   ${nav(isToday ? 'Today' : esc(dateText(d, { weekday: 'long' })), esc(dateText(d, { day: 'numeric', month: 'long', year: 'numeric' })),
     isToday ? '' : '<button class="btn btn-gray btn-sm" data-act="day" data-n="0">Today</button>')}
   ${weekStrip(d)}
-  ${banners(d, pos, sessions)}
+  ${runningBanner()}
+  <p class="lede today-lede">${todayLede(d, sessions, day, food, t)}</p>
   <section class="card summary" aria-label="Food, water and exercise so far">
     <div class="rings">
-      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', food.kcal > t.kcal ? `${fmt(food.kcal - t.kcal)} over` : `${fmt(t.kcal - food.kcal)} left`, 'fork-knife')}
-      ${ring('water', 'Water', water, wTarget, litres(water), 'L', `of ${litres(wTarget)}`, 'drop')}
-      ${ring('effort', 'Exercise', exDone, exPlan, String(exDone), 'min', exPlan ? `of ${exPlan}` : 'rest day', 'flame')}
+      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', food.kcal > t.kcal ? `${fmt(food.kcal - t.kcal)} over` : `${fmt(t.kcal - food.kcal)} left`)}
+      ${ring('water', 'Water', water, wTarget, litres(water), 'L', `of ${litres(wTarget)}`)}
+      ${ring('effort', 'Exercise', exDone, exPlan, String(exDone), 'min', exPlan ? `of ${exPlan}` : 'rest day')}
     </div>
     <div class="mini-bars">
       <div class="mini"><span class="mini-label">Protein</span><span class="mini-val"><span class="num">${food.p}</span> of ${t.protein} g</span>${minibar(food.p, t.protein, 'fuel')}</div>
       <div class="mini"><span class="mini-label">Fibre</span><span class="mini-val"><span class="num">${food.fib}</span> of ${t.fibre} g</span>${minibar(food.fib, t.fibre, 'fuel')}</div>
     </div>
   </section>
-  <div class="tiles">
-    <div class="tile-card"><span class="tile-num num">${counts.sugary}</span><span class="tile-label">Sugary drinks this week</span><span class="tile-sub">Aim for none</span></div>
-    <div class="tile-card"><span class="tile-num num">${counts.purine}</span><span class="tile-label">Red meat, offal or shellfish</span><span class="tile-sub">Aim for 2 or fewer</span></div>
-  </div>
+  ${banners(d, pos, sessions)}
   ${pos.before ? beforeStart() : ''}
   ${sectionHead('Training', planMeta)}
   ${sessionRows(d, sessions, day)}
@@ -277,10 +278,16 @@ function viewToday() {
   ${sectionHead('From your Watch')}
   ${watchForm(d, day)}
   ${sectionHead('Weight')}
-  ${weightForm(d, day)}`;
+  ${weightForm(d, day)}
+  ${sectionHead('This week')}
+  <div class="group">
+    <div class="cell"><div class="cell-main"><div class="cell-title">Sugary drinks</div><div class="cell-sub">Aim for none</div></div><span class="cell-value num">${counts.sugary}</span></div>
+    <div class="cell"><div class="cell-main"><div class="cell-title">Red meat, offal or shellfish</div><div class="cell-sub">Aim for 2 or fewer</div></div><span class="cell-value num">${counts.purine}</span></div>
+  </div>`;
 }
 
-function banners(d, pos, sessions) {
+// A workout that is still going stays at the top of Today, above the rings.
+function runningBanner() {
   const out = [];
   const today = todayISO();
   const a = state.active;
@@ -290,6 +297,22 @@ function banners(d, pos, sessions) {
     out.push(callout('timer', `<p><strong>${a.pausedAt ? 'Paused' : 'Still running'}: ${esc(SESSIONS[a.id].name)}${a.date === today ? '' : ` for ${esc(short(a.date))}`}.</strong> ${sofar}</p>
       <div class="btn-row"><button class="btn btn-fill btn-sm" data-act="resume" data-id="${esc(a.id)}" data-date="${esc(a.date)}">Resume</button><button class="btn btn-gray btn-sm" data-act="finish">Finish</button></div>`, 'effort'));
   }
+  return out.join('');
+}
+
+// One line under the title that answers "what is left today": the sessions still to do and the calories left.
+function todayLede(d, sessions, day, food, t) {
+  const words = ['No', 'One', 'Two', 'Three', 'Four'];
+  const main = sessions.filter((x) => x.kind !== 'rest' && x.id !== 'walks');
+  const left = main.filter((x) => !day?.workouts?.some((w) => w.id === x.id)).length;
+  const train = !main.length ? (sessions.some((x) => x.id === 'walks') ? 'A walking day.' : 'A rest day.') : left ? `${words[Math.min(left, 4)]} ${left === 1 ? 'session' : 'sessions'} to do.` : 'Training done.';
+  const kcal = food.kcal > t.kcal ? `${fmt(food.kcal - t.kcal)} kcal over.` : food.kcal ? `${fmt(t.kcal - food.kcal)} kcal left.` : `${fmt(t.kcal)} kcal to eat.`;
+  return `${train} ${kcal}`;
+}
+
+function banners(d, pos, sessions) {
+  const out = [];
+  const today = todayISO();
   if (d === today && L.weighInDue(state, today)) {
     out.push(callout('scales', '<p><strong>Weigh in before breakfast.</strong> Once a week is enough for the trend.</p><button class="btn btn-fill btn-sm" data-act="weigh-open">Weigh in</button>'));
   }
@@ -360,10 +383,10 @@ function foodToday(d, day) {
     const rows = [
       ...plan.map(({ key, meal, swapped }) => {
         const on = logged.some((f) => f.ref === meal.id && f.slot === slot);
-        return `<div class="cell"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}"><span class="cell-title">${esc(meal.name)}</span>
+        return `<div class="swipe-row"><button class="swipe-act" data-act="swap-open" data-date="${d}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}Swap</button>
+          <div class="cell swipe-front"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}" data-date="${d}" data-key="${key}" data-slot="${slot}"><span class="cell-title">${esc(meal.name)}</span>
             <span class="cell-sub">${meal.kcal} kcal, ${meal.p} g protein${swapped ? ', swapped in' : ''}</span></button>
-          <button class="icon-btn" data-act="swap-open" data-date="${d}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}</button>
-          <button class="btn btn-tinted fuel btn-sm log${on ? ' on' : ''}" data-act="log-menu" data-slot="${slot}" data-id="${meal.id}" aria-pressed="${on}">${on ? `${icon('check')}Eaten` : 'Log'}</button></div>`;
+          <button class="btn btn-tinted fuel btn-sm log${on ? ' on' : ''}" data-act="log-menu" data-slot="${slot}" data-id="${meal.id}" aria-pressed="${on}">${on ? `${icon('check')}Eaten` : 'Log'}</button></div></div>`;
       }),
       ...extra.map(({ f, i }) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(f.name)}</div>
           <div class="cell-sub">${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${f.t ? `, ${esc(f.t)}` : ''}${flagText(f.tags)}</div></div>
@@ -379,7 +402,7 @@ function foodToday(d, day) {
       <button class="cell cell-action" data-act="log-day" ${unlogged ? '' : 'disabled'}>${icon('check-circle')}<span>Log the rest as planned</span></button>
       <button class="cell cell-action" data-act="same-yesterday" ${yesterday ? '' : 'disabled'}>${icon('repeat')}<span>Same as yesterday</span></button>
     </div>
-    ${foot('Tap a meal for its recipe. Anything off-plan goes in with Add food, so the numbers stay honest.')}`;
+    ${foot('Tap a meal for its recipe, or swipe it left to swap it. Anything off-plan goes in with Add food, so the numbers stay honest.')}`;
 }
 
 function watchForm(d, day) {
@@ -421,27 +444,6 @@ function sessionParts(s) {
   if (s.exercises) return [...new Set(s.exercises.flatMap(([id]) => exInfo(id)?.part ?? []))];
   return s.kind === 'cardio' || s.id === 'longwalk' ? ['Legs'] : [];
 }
-// A small front and back figure with the parts that are worked filled in. Drawn here, nothing borrowed.
-function bodyMap(parts) {
-  const all = parts.includes('Full body');
-  const on = (p) => (all || parts.includes(p) ? ' on' : '');
-  const fig = (x, back) => {
-    const c = x + 12;
-    const r = (cls, dx, y, w, h, rad) => `<rect class="bm${cls}" x="${(c + dx).toFixed(1)}" y="${y}" width="${w}" height="${h}" rx="${rad}"/>`;
-    return [
-      `<circle class="bm" cx="${c}" cy="4.2" r="3.4"/>`,
-      r(on('Shoulders'), -10.2, 8.6, 5, 5.4, 2.5), r(on('Shoulders'), 5.2, 8.6, 5, 5.4, 2.5),
-      back ? r(on('Back'), -5.8, 9, 11.6, 12.5, 3) : r(on('Chest'), -5.8, 9, 11.6, 7.2, 3),
-      back ? '' : r(on('Core'), -4.6, 17, 9.2, 9.5, 2.2),
-      r(on('Arms'), -11, 14.8, 3.6, 11.5, 1.8), r(on('Arms'), 7.4, 14.8, 3.6, 11.5, 1.8),
-      back ? r(on('Glutes'), -5.8, 22.5, 11.6, 6, 3) : '',
-      r(on(back ? 'Glutes' : 'Legs'), -5.8, 29, 5.5, 10, 2.6), r(on(back ? 'Glutes' : 'Legs'), 0.3, 29, 5.5, 10, 2.6),
-      r(on('Legs'), -5.4, 40, 4.6, 9, 2.2), r(on('Legs'), 0.8, 40, 4.6, 9, 2.2),
-    ].join('');
-  };
-  return `<svg class="bodymap" viewBox="0 0 58 50" aria-hidden="true">${fig(0, false)}${fig(32, true)}</svg>`;
-}
-
 // One day of the schedule: a row for each workout, or a Rest day row that opens Plan something.
 function planRows(date) {
   const ss = plannedOn(date);
@@ -457,9 +459,10 @@ function planRows(date) {
   return main.map((s, k) => {
     const done = day?.workouts?.some((w) => w.id === s.id);
     const parts = sessionParts(s);
-    const sub = `${s.exercises ? `${plural(s.exercises.length, 'exercise', 'exercises')}` : `${s.minutes} min`}${s.movedFrom ? `, from ${dateText(s.movedFrom, { weekday: 'short' })}` : ''}${s.extra ? ', added' : ''}`;
+    const partText = parts.length ? `, ${parts.slice(0, 3).join(', ').replace(/(?<=, )./g, (c) => c.toLowerCase())}` : '';
+    const sub = `${s.exercises ? `${plural(s.exercises.length, 'exercise', 'exercises')}` : `${s.minutes} min`}${partText}${s.movedFrom ? `, from ${dateText(s.movedFrom, { weekday: 'short' })}` : ''}${s.extra ? ', added' : ''}`;
     return `<button class="cell cell-button plan-row" data-act="open-session" data-id="${s.id}" data-date="${date}">${dayLabel(k === 0)}<span class="tile effort">${icon(sessionIcon(s))}</span>
-      <div class="cell-main"><div class="cell-title">${esc(s.name)}</div><div class="cell-sub">${esc(sub)}</div></div>${parts.length ? bodyMap(parts) : ''}
+      <div class="cell-main"><div class="cell-title">${esc(s.name)}</div><div class="cell-sub">${esc(sub)}</div></div>
       <span class="accessory ${done ? 'done' : ''}">${done ? icon('check-circle') : icon('caret-right')}</span></button>`;
   }).join('');
 }
@@ -1100,7 +1103,8 @@ function sheetSwap(date, key, slot) {
 }
 
 // ---------- Progress ----------
-const CW = 340, CH = 170, PL = 38, PR = 10, PT = 10, PB = 24;
+let CH = 170; // the weight chart is taller and sets it for the length of one call
+const CW = 340, PL = 38, PR = 10, PT = 10, PB = 24;
 function niceMax(v, step) {
   return Math.max(step, Math.ceil(v / step) * step);
 }
@@ -1218,10 +1222,9 @@ function weightChart() {
   const trend = L.weightTrend(state).filter(([d]) => d >= windowFrom);
   const rate = L.weightRate(state, today).kgPerWeek;
   const last = trend.at(-1);
-  const pace = last && rate != null ? [last, [L.addDays(last[0], 28), last[1] + rate * 4]] : [];
   const startD = span ? windowFrom : [p.startDate, ins[0]?.[0] ?? p.startDate].sort()[0];
   const lastD = [today, ins.at(-1)?.[0] ?? today].sort().at(-1);
-  const endD = [L.addDays(lastD, span && span <= 91 ? 7 : 14), ...(span ? [] : [L.addDays(p.startDate, 84)]), pace[1]?.[0] ?? today].sort().at(-1);
+  const endD = L.addDays(lastD, span && span <= 91 ? 7 : 14);
   const goal = L.goalPath(p);
   const goalAt = (d) => {
     if (d <= goal[0][0]) return goal[0][1];
@@ -1234,25 +1237,27 @@ function weightChart() {
     return goal.at(-1)[1];
   };
   const goalPts = [[startD, goalAt(startD)], ...goal.filter(([d]) => d > startD && d < endD), [endD, goalAt(endD)]];
-  const pred = L.predictedWeights(state, today, L.addDays(p.startDate, -7));
-  pred.points = pred.points.filter(([d]) => d >= startD);
-  const predOk = pred.weeks >= 1;
-  const vals = [...ins.map((x) => x[1]), ...goalPts.map((x) => x[1]), ...(predOk ? pred.points.map((x) => x[1]) : []), ...pace.map((x) => x[1])];
-  const { x, yv, s, line } = timeAxis(startD, endD, vals);
-  const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
-    + dotHits(ins.map(([d]) => x(d)), ins.map(([d, v]) => `${short(d)}: ${v.toFixed(1)} kg\nPlan line: ${goalAt(d).toFixed(1)} kg`));
-  const keys = [['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend'], ...(pace.length ? [['pace', 'At this pace']] : []), ['dash', 'Plan line'], ...(predOk ? [['pred', `Expected from ${pred.weeks} fully logged ${pred.weeks === 1 ? 'week' : 'weeks'}`]] : [])];
-  const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, plan line ${goalAt(today).toFixed(1)} today`) : '';
-  const g = L.goalFor(p);
-  const days = last ? L.etaDays(last, rate == null ? null : rate / 7, g, today) : null;
-  const note = days === 0 ? 'Goal reached.'
-    : rate == null ? 'The rate shows after 3 weigh-ins over 2 weeks.'
-    : days ? `At this pace you reach ${g.toFixed(1)} kg around ${esc(dateText(L.addDays(today, days), { day: 'numeric', month: 'short', year: 'numeric' }))}.`
-    : `At this pace there is no date for ${g.toFixed(1)} kg yet.`;
-  const pct = rate != null && last ? ` (${signedDec((rate / last[1]) * 100, 2)}%)` : '';
-  const trendText = rate != null ? `Trend ${signedDec(rate, 1)} kg a week${pct}. ` : '';
-  return `${chartBox('Weight', big, legend(keys), `${s}${line(goalPts, 'l-target')}${predOk ? line(pred.points, 'l-pred') : ''}${line(trend, 'l-weight')}${line(pace, 'l-pace')}${dots}`, 'Tap a weigh-in for its numbers.')}
-  ${foot(trendText + note)}`;
+  const vals = [...ins.map((x) => x[1]), ...goalPts.map((x) => x[1])];
+  CH = 220;
+  try {
+    const { x, yv, s, line } = timeAxis(startD, endD, vals);
+    const dots = ins.map(([d, v]) => `<circle class="d-weight" cx="${x(d)}" cy="${yv(v)}" r="4.5"/>`).join('')
+      + dotHits(ins.map(([d]) => x(d)), ins.map(([d, v]) => `${short(d)}: ${v.toFixed(1)} kg\nPlan line: ${goalAt(d).toFixed(1)} kg`));
+    const big = last ? bigNum(last[1].toFixed(1), 'kg', `trend, plan line ${goalAt(today).toFixed(1)} today`) : '';
+    const g = L.goalFor(p);
+    const days = last ? L.etaDays(last, rate == null ? null : rate / 7, g, today) : null;
+    const note = days === 0 ? 'Goal reached.'
+      : rate == null ? 'The rate shows after 3 weigh-ins over 2 weeks.'
+      : days ? `At this pace you reach ${g.toFixed(1)} kg around ${esc(dateText(L.addDays(today, days), { day: 'numeric', month: 'short', year: 'numeric' }))}.`
+      : `At this pace there is no date for ${g.toFixed(1)} kg yet.`;
+    const pct = rate != null && last ? ` (${signedDec((rate / last[1]) * 100, 2)}%)` : '';
+    const trendText = rate != null ? `Trend ${signedDec(rate, 1)} kg a week${pct}. ` : '';
+    const trendAt = Object.fromEntries(trend);
+    const table = ui.weightTable ? `<div class="card table-card"><div class="scroll-x"><table class="tbl"><thead><tr><th>Date</th><th>Weigh-in kg</th><th>Trend kg</th><th>Plan kg</th></tr></thead><tbody>${ins.slice().reverse().map(([d, v]) => `<tr><td>${esc(short(d))}</td><td>${v.toFixed(1)}</td><td>${trendAt[d] != null ? trendAt[d].toFixed(1) : ''}</td><td>${goalAt(d).toFixed(1)}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+    return `${chartBox('Weight', big, legend([['sw-ink', 'Weigh-ins'], ['sw-ink ln', 'Trend'], ['dash', 'Plan line']]), `${s}${line(goalPts, 'l-target')}${line(trend, 'l-weight')}${dots}`, 'Tap a weigh-in for its numbers.')}
+  ${foot(trendText + note)}
+  <button class="link-btn" data-act="weight-table" aria-expanded="${!!ui.weightTable}">${ui.weightTable ? 'Hide the table' : 'Show as table'}</button>${table}`;
+  } finally { CH = 170; }
 }
 
 function vo2Chart() {
@@ -1319,34 +1324,58 @@ function weekInsights(today) {
 }
 
 function viewProgress() {
-  const sub = { overview: 'Streak, records and your weight', charts: 'Food, water, training and weight', health: 'Blood tests, blood pressure and waist' }[ui.progress] ?? '';
+  const sub = { overview: 'Your weight, streak and records', charts: 'Weight, food, water and training', goals: 'Totals, challenges and milestones', health: 'Blood tests, blood pressure and waist' }[ui.progress] ?? '';
+  const views = [['overview', 'Overview'], ['charts', 'Charts'], ['goals', 'Goals'], ['health', 'Health checks']];
   return `${nav('Progress', sub)}
-  ${segmented('progress-view', [['overview', 'Overview'], ['charts', 'Charts'], ['health', 'Health checks']], ui.progress, 'Progress views')}
-  ${ui.progress === 'health' ? viewHealth() : ui.progress === 'charts' ? viewCharts() : viewOverview()}`;
+  <div class="chips" role="group" aria-label="Progress views">${views.map(([k, label]) => `<button class="chip-btn" data-act="progress-view" data-id="${k}" aria-pressed="${ui.progress === k}">${label}</button>`).join('')}</div>
+  ${ui.progress === 'health' ? viewHealth() : ui.progress === 'charts' ? viewCharts() : ui.progress === 'goals' ? viewGoals() : viewOverview()}`;
 }
 
 const tileCard = (num, label, sub) => `<div class="tile-card"><span class="tile-num num">${num}</span><span class="tile-label">${label}</span><span class="tile-sub">${sub}</span></div>`;
 const duration = (min) => (min >= 60 ? `${Math.floor(min / 60)}h ${min % 60}m` : `${min} min`);
 
+// Four blocks: where the weight stands, the streak, the activity grid and the latest workouts.
 function viewOverview() {
+  return `${weightHero()}
+  ${streakCard()}
+  ${activityCard()}
+  ${recentCard(todayISO())}`;
+}
+
+function weightHero() {
+  const today = todayISO();
+  const trend = L.weightTrend(state).filter(([d]) => d <= today);
+  const last = trend.at(-1);
+  const w30 = L.weightChange30(state, today);
+  const pts = trend.filter(([d]) => d >= L.addDays(today, -90));
+  let spark = '';
+  if (pts.length > 1) {
+    const lo = Math.min(...pts.map((q) => q[1])), hi = Math.max(...pts.map((q) => q[1])), span = L.diffDays(pts[0][0], pts.at(-1)[0]) || 1;
+    const d = pts.map(([dt, v], i) => `${i ? 'L' : 'M'}${(2 + (296 * L.diffDays(pts[0][0], dt)) / span).toFixed(1)},${(4 + 44 * (1 - (v - lo) / (hi - lo || 1))).toFixed(1)}`).join('');
+    spark = `<svg class="spark" viewBox="0 0 300 52" preserveAspectRatio="none" aria-hidden="true"><path class="l-weight" d="${d}"/></svg>`;
+  }
+  const sub = w30 == null ? 'The 30-day change shows after 2 weeks of weigh-ins.' : `${signedDec(w30)} kg in 30 days, on the trend line.`;
+  return `<section class="card weight-hero" aria-label="Body weight">
+    <p class="streak-cap">Body weight</p>
+    <p class="hero-num">${last ? `<span class="num">${last[1].toFixed(1)}</span> <span class="big-unit">kg</span>` : '<span class="hero-none">No weigh-ins yet</span>'}</p>
+    <p class="hero-sub">${esc(sub)}</p>${spark}
+    <div class="btn-row"><button class="btn btn-fill btn-sm" data-act="weigh-open">${icon('plus')}Log weight</button><button class="btn btn-gray btn-sm" data-act="progress-view" data-id="charts">See chart</button></div>
+  </section>`;
+}
+
+function viewGoals() {
   const today = todayISO();
   const t = L.totals(state, today);
-  const w30 = L.weightChange30(state, today);
   const ms = L.milestones(state, today);
   return `<div class="tiles">
     ${tileCard(fmt(t.sessions), 'Workouts', 'Not counting the daily walks')}
     ${tileCard(fmt(t.thisMonth), 'This month', esc(dateText(today, { month: 'long' })))}
-    ${tileCard(w30 == null ? 'Not yet' : `${signedDec(w30)} <span class="big-unit">kg</span>`, 'Weight, 30 days', w30 == null ? 'After 2 weeks of weigh-ins' : 'On the trend line')}
     ${tileCard(`${fmt(t.liftedKg)} <span class="big-unit">kg</span>`, 'Lifted in total', 'Weight times reps times sets')}
+    ${tileCard(L.streakInfo(state, today).current, 'Weeks in a row', 'At half the plan or more')}
   </div>
-  ${streakCard()}
   ${challengesCard(today)}
-  ${activityCard()}
-  ${recentCard(today)}
-  ${sectionHead('Body weight', `<button class="btn btn-gray btn-sm" data-act="weigh-open">${icon('plus')}Log weight</button>`)}
+  ${sectionHead('Weight goals')}
   ${weightTiles(ms)}
-  ${segmented('weight-range', [['1M', '1M'], ['3M', '3M'], ['1Y', '1Y'], ['All', 'All']], ui.weightRange, 'Weight chart range')}
-  ${weightChart()}
   ${milestoneList(ms)}`;
 }
 
@@ -1365,7 +1394,7 @@ function streakCard() {
     <div class="streak-top"><div><p class="streak-cap">Week streak</p><p class="streak-num num">${icon('flame')}${s.current}</p></div>
       <div class="streak-side"><p class="streak-best">Best: <span class="num">${s.best}</span></p><p class="flakes" aria-label="${plural(s.freezes, 'freeze', 'freezes')} of ${L.FREEZE_MAX}">${flakes}</p></div></div>
     <ul class="badges">${badges}</ul>
-    ${s.next ? `<div class="streak-next"><span>Next badge at ${s.next} weeks.</span><span class="num">${s.current} / ${s.next}</span></div>${minibar(s.current, s.next, 'effort', 300)}` : '<p class="streak-next"><span>Every badge is earned.</span></p>'}
+    ${s.next ? `<div class="streak-next"><span>Next badge at ${s.next} weeks.</span><span class="num">${s.current} / ${s.next}</span></div>${minibar(s.current, s.next, 'win', 300)}` : '<p class="streak-next"><span>Every badge is earned.</span></p>'}
     <p class="streak-note">${note}</p>
   </section>`;
 }
@@ -1374,8 +1403,8 @@ function challengesCard(today) {
   const list = L.monthlyChallenges(state, today);
   const done = list.filter((c) => c.done).length;
   return `<section class="card challenges">
-    <button class="cell-head" data-act="challenges-toggle" aria-expanded="${ui.chOpen}"><span class="cell-main"><span class="cell-sub">Challenges</span><span class="cell-title">${esc(dateText(today, { month: 'long', year: 'numeric' }))}, ${done} of ${list.length} done</span></span><span class="accessory ch-caret${ui.chOpen ? ' open' : ''}">${icon('caret-right')}</span></button>
-    ${ui.chOpen ? `<div class="ch-list">${list.map((c) => `<div class="ch-row"><div class="cell-main"><span class="cell-title">${esc(c.title)}</span><span class="cell-sub num">${Math.min(c.value, c.target)} of ${c.target}</span></div>${c.done ? `<span class="accessory done">${icon('check-circle')}</span>` : ''}${minibar(c.value, c.target, 'effort', 300)}</div>`).join('')}</div>` : ''}
+    <div class="cell-head"><span class="cell-main"><span class="cell-sub">Challenges</span><span class="cell-title">${esc(dateText(today, { month: 'long', year: 'numeric' }))}, ${done} of ${list.length} done</span></span></div>
+    <div class="ch-list">${list.map((c) => `<div class="ch-row"><div class="cell-main"><span class="cell-title">${esc(c.title)}</span><span class="cell-sub num">${Math.min(c.value, c.target)} of ${c.target}</span></div>${c.done ? `<span class="accessory done">${icon('check-circle')}</span>` : ''}${minibar(c.value, c.target, 'win', 300)}</div>`).join('')}</div>
   </section>`;
 }
 
@@ -1387,7 +1416,7 @@ function activityCard() {
   const vol = ui.heatMetric === 'volume';
   const g = L.activityGrid(state, today, weeks, ui.heatMetric);
   const tipOf = (c) => `${dateText(c.date, { weekday: 'short', day: 'numeric', month: 'short' })}: ${vol ? (c.vol ? `${fmt(c.vol)} kg lifted` : 'no lifting') : (c.min ? `${c.min} min of exercise` : 'no exercise logged')}`;
-  const cell = (c) => (c.future ? '<span class="heat-cell future"></span>' : year ? `<span class="heat-cell l${c.level}"></span>` : `<button class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}" aria-label="${esc(tipOf(c))}"></button>`);
+  const cell = (c) => (c.future ? '<span class="heat-cell future"></span>' : year ? `<span class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}"></span>` : `<button class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}" aria-label="${esc(tipOf(c))}"></button>`);
   const at = Object.fromEntries(g.months.map((m) => [m.col, m.month]));
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const labels = g.cols.map((_, i) => `<span class="heat-month">${at[i] && (year || i < weeks - 1) ? MONTHS[at[i] - 1] : ''}</span>`).join('');
@@ -1427,7 +1456,10 @@ function viewCharts() {
   const stat = (label, value, bar = '') => `<div class="cell${bar ? ' meter-cell' : ''}"><div class="cell-main"><div class="cell-title">${label}</div></div><span class="cell-value">${value}</span>${bar}</div>`;
   // Rows with a target show the week as a bar, as Train does; no bar without data or a target.
   const bar = (value, target, kind) => (value != null && target > 0 ? minibar(value, target, kind, 300) : '');
-  return `${sectionHead('This week')}
+  return `${sectionHead('Body weight', `<button class="btn btn-gray btn-sm" data-act="weigh-open">${icon('plus')}Log weight</button>`)}
+  ${segmented('weight-range', [['1M', '1M'], ['3M', '3M'], ['1Y', '1Y'], ['All', 'All']], ui.weightRange, 'Weight chart range')}
+  ${weightChart()}
+  ${sectionHead('This week')}
   ${weekInsights(today)}
   <div class="group">
     ${stat('Sessions done', `${wk.done} of ${wk.planned}`, bar(wk.done, wk.planned, 'gray'))}
@@ -1680,7 +1712,6 @@ function sheetWeigh() {
 function sheetCheckIn() {
   const last = L.weighIns(state).filter(([x]) => x <= todayISO()).at(-1);
   const start = Math.round((last?.[1] ?? state.profile.startWeight) * 10) / 10;
-  const chip = (n) => `<button type="button" class="btn btn-gray btn-sm num" data-act="weigh-step" data-n="${n}" aria-label="${Math.abs(n)} kg ${n < 0 ? 'less' : 'more'}">${n < 0 ? '−' : '+'}${Math.abs(n)}</button>`;
   return `<div class="sheet">${sheetHead('Quick check-in')}
     ${foot('Slide or tap to set your weight. Once a week keeps your trend honest.')}
     <form data-form="checkin">
@@ -1689,7 +1720,6 @@ function sheetCheckIn() {
         <label class="weigh-num"><input name="kg" inputmode="decimal" value="${start.toFixed(1)}" autocomplete="off" aria-label="Weight in kg" aria-describedby="weigh-error"><span class="big-unit">kg</span></label>
         <button type="button" class="btn btn-gray num" data-act="weigh-step" data-n="0.1" aria-label="0.1 kg more">+0.1</button>
       </div>
-      <div class="weigh-chips">${[-1, -0.5, 0.5, 1].map(chip).join('')}</div>
       <input class="weigh-slide" type="range" name="slide" min="${(start - 10).toFixed(1)}" max="${(start + 10).toFixed(1)}" step="0.1" value="${start.toFixed(1)}" aria-label="Weight slider">
       <p class="sr-only" id="weigh-said" aria-live="polite"></p>
       ${formError('weigh-error')}
@@ -1746,6 +1776,47 @@ const rubberband = (x, size, c = 0.55) => (x * size * c) / (size + c * x);
 const project = (v, rate = 0.998) => (v * rate) / (1 - rate); // v in px per ms
 const outside = (e, r) => e.clientY < r.top || e.clientX < r.left || e.clientX > r.right;
 let backdropDown = false; // a tap on the dimmed page closes the sheet only if it also started there
+// A meal row slides left to show Swap. A drag that starts on the title or the Log button still swipes, and the tap that follows it is dropped.
+let swipedAt = 0;
+function swipeRow(e) {
+  const front = e.target.closest?.('.swipe-front');
+  if (!front || !e.isPrimary || e.button > 0) return;
+  const row = front.parentElement;
+  const W = row.querySelector('.swipe-act').offsetWidth;
+  const was = row.classList.contains('open');
+  document.querySelectorAll('.swipe-row.open').forEach((r) => { if (r !== row) { r.classList.remove('open'); r.querySelector('.swipe-front').style.transform = ''; } });
+  const x0 = e.clientX, y0 = e.clientY;
+  let axis = null, last = 0, lastT = e.timeStamp, v = 0;
+  const base = was ? -W : 0;
+  const move = (m) => {
+    const dx = m.clientX - x0, dy = m.clientY - y0;
+    if (!axis && Math.abs(dx) + Math.abs(dy) > 8) axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    if (axis !== 'x') return;
+    row.classList.add('drag');
+    const x = Math.min(0, Math.max(-W, base + dx));
+    front.style.transition = 'none';
+    front.style.transform = `translateX(${x}px)`;
+    v = (x - last) / Math.max(1, m.timeStamp - lastT);
+    last = x; lastT = m.timeStamp;
+  };
+  const up = (u) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    front.style.transition = '';
+    row.classList.remove('drag');
+    if (axis === 'x') {
+      swipedAt = u.timeStamp;
+      const open = u.type === 'pointerup' && (v < -0.3 || (v < 0.3 && last < -W / 2));
+      row.classList.toggle('open', open);
+      front.style.transform = '';
+    }
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
 function dragSheet(e) {
   const s = $('#sheet');
   backdropDown = e.target === s && outside(e, s.getBoundingClientRect());
@@ -1902,6 +1973,13 @@ function showTip(el, e) {
 function hideTip() {
   $('#tip').hidden = true;
 }
+// Drag a finger sideways over the activity grid to read each day, as the year view's squares are too small to tap one by one.
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse' && !e.buttons) return;
+  const g = e.target.closest?.('.heat');
+  const c = g && document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.heat-cell[data-tip]');
+  if (c) showTip(c, e);
+});
 let toastTimer = null;
 function toast(msg, undo = false, typing = false) {
   const err = !undo && $('#sheet[open]:not(.closing) .form-error'); // the open sheet covers the toast
@@ -2106,7 +2184,10 @@ const ACT = {
   },
   recipe: (el) => {
     const m = L.MEAL_BY_ID[el.dataset.id];
-    showSheet(`<div class="sheet">${sheetHead(esc(m.name))}<div class="card prose recipe">${recipeBody(m)}</div></div>`);
+    const { date, key, slot } = el.dataset;
+    // Opened from a meal row, the sheet also offers Swap, for anyone who does not swipe.
+    const swap = date && key ? `<div class="group actions-group"><button class="cell cell-action" data-act="swap-open" data-date="${esc(date)}" data-key="${esc(key)}" data-slot="${esc(slot)}">${icon('arrows-left-right')}<span>Swap this meal</span></button></div>` : '';
+    showSheet(`<div class="sheet">${sheetHead(esc(m.name))}${swap}<div class="card prose recipe">${recipeBody(m)}</div></div>`);
   },
   'swap-open': (el) => showSheet(sheetSwap(el.dataset.date, el.dataset.key, el.dataset.slot)),
   'swap-set': (el) => {
@@ -2439,9 +2520,9 @@ const ACT = {
   'food-week': (el) => { ui.foodWeek = el.dataset.id; render(); },
   'progress-view': (el) => { ui.progress = el.dataset.id; render(); },
   'weight-range': (el) => { ui.weightRange = el.dataset.id; render(); },
+  'weight-table': () => { ui.weightTable = !ui.weightTable; render(); },
   'heat-metric': (el) => { ui.heatMetric = el.dataset.id; render(); },
   'heat-range': (el) => { ui.heatRange = el.dataset.id; render(); },
-  'challenges-toggle': () => { ui.chOpen = !ui.chOpen; render(); },
   'shop-clear': () => {
     snapshot();
     delete state.shopping[foodMonday()];
@@ -2950,6 +3031,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches?.('input[data-act="watch"], input[data-act^="ex-"]')) e.target.blur();
 });
 $('#sheet').addEventListener('pointerdown', dragSheet);
+document.addEventListener('pointerdown', swipeRow);
+// The click that ends a swipe is not a tap on the row.
+document.addEventListener('click', (e) => { if (e.timeStamp - swipedAt < 400 && e.target.closest?.('.swipe-front')) { e.stopPropagation(); e.preventDefault(); } }, true);
 // Escape slides it down as well. Without a recent tap the browser closes the dialog itself, and the event says so.
 $('#sheet').addEventListener('cancel', (e) => { if (e.cancelable) { e.preventDefault(); closeSheet(); } });
 // iOS Safari only applies :active press styles on pages that listen for touches.
