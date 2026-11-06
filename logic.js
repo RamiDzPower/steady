@@ -1,6 +1,6 @@
 // Pure functions: dates, plan lookup, targets, daily and weekly numbers, menus, shopping, prep,
 // health checks, imports and backups. No DOM access here, so all of it runs under node --test.
-import { BLOCKS, SESSIONS, MEALS, MENUS, ITEMS, GROUPS, PANTRY, BATCHES, BATCH_ORDER, CHECKINS, REMINDERS, LABS } from './plan.js';
+import { BLOCKS, SESSIONS, EXERCISES, BODY_PARTS, EX_INFO, MEALS, MENUS, ITEMS, GROUPS, PANTRY, BATCHES, BATCH_ORDER, CHECKINS, REMINDERS, LABS } from './plan.js';
 
 // No prototype, so stored ids like 'constructor' or 'toString' never pass as meals.
 export const MEAL_BY_ID = Object.assign(Object.create(null), Object.fromEntries(MEALS.map((m) => [m.id, m])));
@@ -85,7 +85,7 @@ function plannedSessions(startDate, date, repeats) {
 }
 
 // moves: { id, from, to } entries. A moved session leaves its planned day and shows on the new one, planned as it was for its own week.
-export function sessionsFor(startDate, date, repeats = [], moves = []) {
+export function sessionsFor(startDate, date, repeats = [], moves = [], extras = []) {
   const out = plannedSessions(startDate, date, repeats);
   for (const m of moves) {
     if (m.from !== date) continue;
@@ -97,7 +97,44 @@ export function sessionsFor(startDate, date, repeats = [], moves = []) {
     const moved = plannedSessions(startDate, m.from, repeats).find((x) => x.id === m.id);
     if (moved) out.push({ ...moved, movedFrom: m.from });
   }
+  for (const x of extras) if (x.date === date && !out.some((o) => o.id === x.id)) out.push(extraSession(startDate, date, repeats, x.id));
   return out;
+}
+
+// A session the user added to a day. It is planned as in its own week if the week has it, else as the session is defined.
+function extraSession(startDate, date, repeats, id) {
+  const monday = mondayOf(date);
+  for (let i = 0; i < 7; i++) {
+    const found = plannedSessions(startDate, addDays(monday, i), repeats).find((s) => s.id === id);
+    if (found) return { ...found, extra: true };
+  }
+  const base = SESSIONS[id];
+  return { ...base, id, minutes: base.minutes || 30, reps: null, exercises: base.exercises, deload: false, extra: true };
+}
+
+// The sessions someone could add to `date`: not rest, not the daily walks, not already there.
+export function planOptions(state, date) {
+  const here = sessionsFor(state.profile.startDate, date, state.repeats || [], state.moves || [], state.extras || []).map((s) => s.id);
+  return Object.entries(SESSIONS).filter(([id, s]) => s.kind !== 'rest' && id !== 'walks' && !here.includes(id)).map(([id, s]) => ({ id, name: s.name, minutes: s.minutes || 30 }));
+}
+
+// With Rotation, today shows the next session of the week that is not done, whatever weekday it was planned for.
+export function rotationSessions(state, date) {
+  const p = state.profile;
+  const reps = state.repeats || [];
+  const monday = mondayOf(date);
+  const own = sessionsFor(p.startDate, date, reps, state.moves || [], state.extras || []);
+  const walks = own.filter((s) => s.id === 'walks' || s.kind === 'rest');
+  const have = {};
+  for (let i = 0; i < 7; i++) for (const w of state.days[addDays(monday, i)]?.workouts ?? []) have[w.id] = (have[w.id] ?? 0) + 1;
+  for (let i = 0; i < 7; i++) {
+    for (const s of sessionsFor(p.startDate, addDays(monday, i), reps, state.moves || [], state.extras || [])) {
+      if (s.kind === 'rest' || s.id === 'walks') continue;
+      if (have[s.id] > 0) { have[s.id]--; continue; }
+      return [...walks.filter((x) => x.kind !== 'rest'), s];
+    }
+  }
+  return walks;
 }
 
 // The moves after putting session `id`, now on `at`, on `to`. Moving it back to its planned day removes the move.
@@ -224,12 +261,14 @@ export function weekSummary(state, monday, n = 7) {
   const reps = state.repeats || [];
   const out = { monday, planned: 0, done: 0, strengthDone: 0, exMin: 0, load: 0, steps: [], kcal: [], protein: [], water: [], waterTarget: [], balance: [], weights: [] };
   const base = targets(p, weightOn(state, monday)).waterBase;
+  const want = [], have = {};
   for (let i = 0; i < n; i++) {
     const date = addDays(monday, i);
     const day = state.days[date];
-    const planned = sessionsFor(p.startDate, date, reps, state.moves || []).filter((s) => s.kind !== 'rest');
+    const planned = sessionsFor(p.startDate, date, reps, state.moves || [], state.extras || []).filter((s) => s.kind !== 'rest');
     out.planned += planned.length;
-    out.done += planned.filter((s) => day?.workouts?.some((w) => w.id === s.id)).length;
+    want.push(...planned.map((s) => s.id));
+    for (const w of day?.workouts ?? []) have[w.id] = (have[w.id] ?? 0) + 1;
     out.strengthDone += (day?.workouts ?? []).filter((w) => SESSIONS[w.id]?.kind === 'strength').length;
     out.exMin += effortMinutes(day);
     out.load += trainingLoad(day);
@@ -247,6 +286,8 @@ export function weekSummary(state, monday, n = 7) {
     if (b != null) out.balance.push(b);
     if (day?.weight) out.weights.push([date, day.weight]);
   }
+  // A session done on another day than planned still counts for its week.
+  for (const id of want) if (have[id] > 0) { have[id]--; out.done++; }
   const avg = (a) => (a.length ? Math.round(mean(a)) : null);
   return {
     ...out,
@@ -703,6 +744,88 @@ export function heavierLifts(state, ex, date) {
     return e.kg && e.sets && last?.kg && e.kg > last.kg ? [{ id: e.id, kg: e.kg, was: last.kg }] : [];
   });
 }
+// ---- Week streak with freezes, challenges, recent workouts ----
+export const STREAK_BADGES = [4, 12, 26, 52, 104];
+export const FREEZE_MAX = 2;
+// Weeks in a row at half the plan or more. A missed week spends a freeze and keeps the run; a freeze comes back after 4 good weeks in a row.
+// Without a freeze a missed week ends the run. This week can add to it but not break it.
+export function streakInfo(state, today) {
+  const weeks = state.profile ? planWeeks(state, today) : [];
+  let run = 0, best = 0, freezes = FREEZE_MAX, good = 0, used = 0;
+  weeks.forEach((w, i) => {
+    if (w.half) {
+      run++;
+      if (++good >= 4 && freezes < FREEZE_MAX) { freezes++; good = 0; }
+    } else if (i < weeks.length - 1) {
+      good = 0;
+      if (freezes > 0) { freezes--; used++; } else run = 0;
+    }
+    best = Math.max(best, run);
+  });
+  return { current: run, best, freezes, used, next: STREAK_BADGES.find((b) => b > run) ?? null, earned: STREAK_BADGES.filter((b) => b <= best) };
+}
+
+// Three goals for the month of `today`, each with how far along it is.
+export function monthlyChallenges(state, today) {
+  const month = today.slice(0, 7);
+  const base = state.profile ? targets(state.profile, weightOn(state, today)).waterBase : 2500;
+  let sessions = 0, food = 0, water = 0;
+  for (const [d, day] of Object.entries(state.days)) {
+    if (!d.startsWith(month) || d > today) continue;
+    sessions += (day.workouts ?? []).filter((w) => w.id !== 'walks').length;
+    if (day.foods?.length) food++;
+    if (day.water?.length && waterTotal(day) >= waterTarget(day, base)) water++;
+  }
+  const item = (id, title, value, target) => ({ id, title, value, target, done: value >= target });
+  return [item('train', 'Train 8 times', sessions, 8), item('food', 'Log your food on 20 days', food, 20), item('water', 'Reach your water target on 15 days', water, 15)];
+}
+
+// A workout's weight lifted, and how many of its lifts beat everything logged before that day.
+function liftStats(state, date, w) {
+  let sets = 0, kg = 0, prs = 0;
+  for (const e of w.ex ?? []) {
+    if (!(e.sets > 0)) continue;
+    sets += e.sets;
+    if (e.kg > 0 && e.reps > 0) kg += e.kg * e.reps * e.sets;
+    const best = e.kg > 0 ? bestKg(state, e.id, date) : null;
+    if (best != null && e.kg > best) prs++;
+  }
+  return { sets, kg: Math.round(kg * 10) / 10, prs };
+}
+// The latest logged workouts, newest first, not counting the daily walks.
+export function recentWorkouts(state, today, n = 5) {
+  const out = [];
+  for (const d of Object.keys(state.days).filter((x) => x <= today).sort().reverse()) {
+    for (const w of [...(state.days[d].workouts ?? [])].reverse()) {
+      if (w.id === 'walks') continue;
+      out.push({ date: d, id: w.id, name: SESSIONS[w.id]?.name ?? w.name ?? 'Workout', min: w.min ?? 0, ...liftStats(state, d, w) });
+      if (out.length >= n) return out;
+    }
+  }
+  return out;
+}
+// Trend change over the last 30 days, or since the first weigh-in once that is at least 14 days ago. Null before that.
+export function weightChange30(state, today) {
+  const t = weightTrend(state).filter(([d]) => d <= today);
+  if (t.length < 2) return null;
+  const now = t.at(-1);
+  const old = [...t].reverse().find(([d]) => d <= addDays(today, -30)) ?? t[0];
+  return diffDays(old[0], now[0]) >= 14 ? Math.round((now[1] - old[1]) * 10) / 10 : null;
+}
+// A weight chart's points for 1M, 3M, 1Y or All, as [date, kg] readings and the trend through them.
+export function weightRange(state, range, today) {
+  const days = { '1M': 30, '3M': 91, '1Y': 365 }[range];
+  const from = days ? addDays(today, -days) : '0000-00-00';
+  return { readings: weighIns(state).filter(([d]) => d >= from && d <= today), trend: weightTrend(state).filter(([d]) => d >= from && d <= today) };
+}
+
+// An exercise by id: the plan's, or one the user made.
+export function exerciseOf(state, id) {
+  if (Object.hasOwn(EXERCISES, id)) return { ...EXERCISES[id], ...EX_INFO[id] };
+  const c = (state.customEx ?? []).find((x) => x.id === id);
+  return c ? { name: c.name, cue: '', alt: '', part: c.part, gear: 'Your own', unit: c.unit, custom: true } : null;
+}
+
 // The most weight ever logged for an exercise on a day before `date`, or null when it has never been logged with a weight.
 export function bestKg(state, exId, date) {
   let best = null;
@@ -714,24 +837,37 @@ export function bestKg(state, exId, date) {
 }
 
 // The last `weeks` weeks as columns that start on Monday, ending with the week of `today`.
-// Each day has its exercise minutes and a level from 0 (nothing) to 4; days after today are marked `future`.
-export function activityGrid(state, today, weeks = 12) {
+// Each day has its exercise minutes (`min`), the weight lifted (`vol`) and a level from 0 (nothing) to 4 for the chosen metric;
+// days after today are marked `future`. `months` lists the columns that hold the 1st of a month, for labels.
+export function activityGrid(state, today, weeks = 12, metric = 'time') {
   const first = addDays(mondayOf(today), -7 * (weeks - 1));
-  const cols = [];
-  let active = 0, counted = 0;
+  const cols = [], months = [];
+  let active = 0, counted = 0, top = 0;
+  const volumeOf = (day) => {
+    let v = 0;
+    for (const w of day?.workouts ?? []) for (const e of w.ex ?? []) if (e.kg > 0 && e.reps > 0 && e.sets > 0) v += e.kg * e.reps * e.sets;
+    return Math.round(v);
+  };
   for (let w = 0; w < weeks; w++) {
     const col = [];
     for (let d = 0; d < 7; d++) {
       const date = addDays(first, w * 7 + d);
       const future = date > today;
       const min = future ? 0 : effortMinutes(state.days[date]);
-      const level = !min ? 0 : min < 20 ? 1 : min < 40 ? 2 : min < 70 ? 3 : 4;
-      if (!future && date >= (state.profile?.startDate ?? first)) { counted++; if (min) active++; }
-      col.push({ date, min, level, future });
+      const vol = future ? 0 : volumeOf(state.days[date]);
+      top = Math.max(top, vol);
+      if (!future && date >= (state.profile?.startDate ?? first)) { counted++; if (min || vol) active++; }
+      if (date.endsWith('-01')) months.push({ col: w, month: Number(date.slice(5, 7)) });
+      col.push({ date, min, vol, level: 0, future });
     }
     cols.push(col);
   }
-  return { cols, active, counted };
+  for (const col of cols) for (const c of col) {
+    c.level = metric === 'volume'
+      ? (c.vol ? Math.max(1, Math.ceil((c.vol / top) * 4)) : 0)
+      : !c.min ? 0 : c.min < 20 ? 1 : c.min < 40 ? 2 : c.min < 70 ? 3 : 4;
+  }
+  return { cols, months, active, counted };
 }
 
 // Lifetime numbers: sessions (not the daily walks), this month's, active days, and the weight lifted in logged sets.
@@ -752,7 +888,7 @@ export function totals(state, today) {
 export function nextSession(state, from) {
   for (let i = 0; i < 14; i++) {
     const date = addDays(from, i);
-    const s = sessionsFor(state.profile.startDate, date, state.repeats || [], state.moves || [])
+    const s = sessionsFor(state.profile.startDate, date, state.repeats || [], state.moves || [], state.extras || [])
       .find((x) => x.kind !== 'rest' && x.id !== 'walks' && !state.days[date]?.workouts?.some((w) => w.id === x.id));
     if (s) return { date, session: s };
   }
@@ -1061,7 +1197,7 @@ function cleanSettings(s) {
     if (v && typeof v === 'object') reminders[r.id] = { on: v.on !== false, time: TIME.test(v.time) ? v.time : r.time };
   }
   const hot = arr(o.hotMonths, 12).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);
-  return { hotMonths: o.hotMonths ? [...new Set(hot)] : [3, 4, 5], loudBeep: o.loudBeep === true, reminders };
+  return { hotMonths: o.hotMonths ? [...new Set(hot)] : [3, 4, 5], loudBeep: o.loudBeep === true, train: o.train === 'rotation' ? 'rotation' : 'fixed', reminders };
 }
 
 // Rebuilds a backup with known fields and types only.
@@ -1105,9 +1241,11 @@ export function cleanBackup(data) {
     for (const [k, id] of Object.entries(s)) if (/^(breakfast|lunch|dinner|snack\d)$/.test(k) && MEAL_BY_ID[id]) (swaps[d] ||= {})[k] = id;
   }
   const moves = arr(data.moves, 60).flatMap((m) => (m && typeof m.id === 'string' && Object.hasOwn(SESSIONS, m.id) && SESSIONS[m.id].kind !== 'rest' && DATE.test(m.from) && DATE.test(m.to) && m.from !== m.to ? [{ id: m.id, from: m.from, to: m.to }] : []));
+  const extras = arr(data.extras, 60).flatMap((x) => (x && typeof x.id === 'string' && Object.hasOwn(SESSIONS, x.id) && SESSIONS[x.id].kind !== 'rest' && x.id !== 'walks' && DATE.test(x.date) ? [{ id: x.id, date: x.date }] : []));
+  const customEx = arr(data.customEx, 60).flatMap((x) => (x && typeof x.id === 'string' && /^x[a-z0-9]{1,12}$/.test(x.id) && typeof x.name === 'string' && x.name.trim() ? [{ id: x.id, name: str(x.name.trim(), 60), part: BODY_PARTS.includes(x.part) ? x.part : 'Full body', unit: x.unit === 's' ? 's' : 'reps' }] : []));
   const excluded = [...new Set(arr(data.excluded, 100).filter((id) => typeof id === 'string' && MEAL_BY_ID[id]))];
   return {
-    v: 1, profile, days, custom, shopping, swaps, excluded, moves,
+    v: 1, profile, days, custom, shopping, swaps, excluded, moves, extras, customEx,
     repeats: dates(data.repeats), skipHolds: dates(data.skipHolds), autoHolds: dates(data.autoHolds), holdChecked: DATE.test(data.holdChecked) ? data.holdChecked : null,
     labs: cleanLabs(data.labs), bp: cleanBp(data.bp), waist: cleanWaist(data.waist), settings: cleanSettings(data.settings),
     lastBackup: DATE.test(data.lastBackup) ? data.lastBackup : null, seenVersion: num(data.seenVersion, 0, 1000) ?? 0,

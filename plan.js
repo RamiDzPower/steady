@@ -95,6 +95,35 @@ export const SESSIONS = {
   },
 };
 
+// What each exercise works and what it needs, for the library, the filters and the little body maps.
+// The parts are what the body map lights up: Legs (front thighs and calves), Glutes (and hamstrings), Chest, Back, Shoulders, Arms, Core.
+export const BODY_PARTS = ['Legs', 'Glutes', 'Chest', 'Back', 'Shoulders', 'Arms', 'Core', 'Full body'];
+export const EX_INFO = {
+  sitstand: { part: 'Legs', muscles: 'Quads, glutes', gear: 'A chair' },
+  wallpush: { part: 'Chest', muscles: 'Chest, triceps', gear: 'A counter' },
+  bridge: { part: 'Glutes', muscles: 'Glutes, hamstrings', gear: 'Body weight' },
+  bprow: { part: 'Back', muscles: 'Upper back, biceps', gear: 'A backpack' },
+  kneeplank: { part: 'Core', muscles: 'Abs', gear: 'Body weight' },
+  goblet: { part: 'Legs', muscles: 'Quads, glutes', gear: 'A dumbbell or backpack' },
+  inclinepush: { part: 'Chest', muscles: 'Chest, triceps', gear: 'A bench' },
+  splitsquat: { part: 'Legs', muscles: 'Quads, glutes', gear: 'Body weight' },
+  deadbug: { part: 'Core', muscles: 'Abs', gear: 'Body weight' },
+  carry: { part: 'Full body', muscles: 'Grip, core, legs', gear: 'Dumbbells or bags' },
+  hipthrust: { part: 'Glutes', muscles: 'Glutes, hamstrings', gear: 'A bench' },
+  rdl: { part: 'Glutes', muscles: 'Hamstrings, glutes', gear: 'Dumbbells' },
+  onearmrow: { part: 'Back', muscles: 'Lats, biceps', gear: 'A dumbbell' },
+  stepup: { part: 'Legs', muscles: 'Quads, glutes', gear: 'A step' },
+  sideplank: { part: 'Core', muscles: 'Obliques', gear: 'Body weight' },
+  legpress: { part: 'Legs', muscles: 'Quads, glutes', gear: 'Machine' },
+  chestpress: { part: 'Chest', muscles: 'Chest, triceps', gear: 'Machine' },
+  pulldown: { part: 'Back', muscles: 'Lats, biceps', gear: 'Cable machine' },
+  cablerow: { part: 'Back', muscles: 'Upper back, biceps', gear: 'Cable machine' },
+  shoulderpress: { part: 'Shoulders', muscles: 'Shoulders, triceps', gear: 'Machine' },
+  legcurl: { part: 'Legs', muscles: 'Hamstrings', gear: 'Machine' },
+  pallof: { part: 'Core', muscles: 'Abs, obliques', gear: 'Cable machine' },
+  plank: { part: 'Core', muscles: 'Abs', gear: 'Body weight' },
+};
+
 // When a machine or a bench is taken, these stand in for an exercise that is counted in reps. Sets, reps and rest stay as planned.
 export const SWAPS = {
   sitstand: ['goblet', 'stepup'], wallpush: ['inclinepush', 'bprow'], bridge: ['hipthrust', 'rdl'], bprow: ['onearmrow', 'cablerow'],
@@ -531,8 +560,18 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 7;
+export const APP_VERSION = 8;
 export const CHANGES = [
+  {
+    version: 8,
+    notes: [
+      'Progress opens on an Overview: your week streak with freezes and badges, monthly challenges, an activity grid by weeks or months, recent workouts with records, and your weight with 1M, 3M, 1Y and All.',
+      'Train has an Exercises tab with search, body parts, drawings and your own exercises, and the + adds one to the workout you are doing.',
+      'Tap a rest day, or a day with only walks, to plan a session there. Rotation shows the next session you have not done, whatever the weekday.',
+      'Starting a workout asks for your weight when a weigh-in is due.',
+      'A session done on another day than planned still counts for its week.',
+    ],
+  },
   {
     version: 7,
     notes: [

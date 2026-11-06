@@ -34,6 +34,8 @@ The state marks What's new as seen. To see that sheet open on load, set `seenVer
 
 ## Look for sideways overflow
 
+Reload the page between runs: a second run on the same page stops part way (the finish sheet is not there to submit), and since this release the tool reports that as an `ERROR after N lines` line instead of throwing.
+
 ```sh
 agent-browser eval "$(cat "$REPO/tools/check-overflow.js")" | sed 's/\\n/\n/g'
 ```

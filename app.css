@@ -769,6 +769,76 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .ex-best { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.88rem; font-weight: 600; line-height: 1.35; color: var(--effort-ink); }
 .ex-best .i { width: 16px; height: 16px; }
 
+/* ---- Overview: streak, challenges, grid by year, records ---- */
+.streak { padding: 16px; }
+.streak-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.streak-cap, .streak-best { font-size: 0.82rem; color: var(--label-2); }
+.streak-num { display: flex; align-items: center; gap: 8px; font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
+.streak-num .i { width: 30px; height: 30px; color: var(--fuel); }
+.streak-side { text-align: right; }
+.flakes { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.flake { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--fill); color: var(--label-3); }
+.flake.on { background: var(--water-soft); color: var(--water-ink); }
+.flake .i { width: 15px; height: 15px; }
+.badges { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 12px; padding: 0; list-style: none; }
+.badge { display: grid; justify-items: center; gap: 4px; padding: 10px 0 8px; border-radius: 14px; background: var(--fill); color: var(--label-2); font-size: 0.88rem; font-weight: 600; }
+.badge .i { width: 24px; height: 24px; color: var(--label-3); }
+.badge.on { color: var(--label); }
+.badge.on .i { color: var(--effort-ink); }
+.streak-next { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 0.88rem; color: var(--label-2); }
+.streak-note { margin-top: 10px; font-size: 0.82rem; color: var(--label-2); }
+.challenges { padding: 0; }
+.cell-head { appearance: none; border: 0; background: none; width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; text-align: left; cursor: pointer; color: inherit; }
+.cell-head .cell-main { display: grid; gap: 2px; flex: 1; }
+.ch-caret { transition: transform 0.25s var(--ease); }
+.ch-caret.open { transform: rotate(90deg); }
+.ch-list { padding: 0 16px 14px; display: grid; gap: 14px; }
+.ch-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; }
+.ch-row .minibar { grid-column: 1 / -1; }
+.heat.y { gap: 2px; }
+.heat.y .heat-cell { border-radius: 2px; }
+.heat.y { grid-template-columns: repeat(52, minmax(0, 1fr)); }
+.heat-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; height: 14px; }
+.heat-months.y { grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 2px; }
+.heat-month { font-size: 0.62rem; line-height: 14px; color: var(--label-2); white-space: nowrap; overflow: visible; }
+.heat-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.heat-foot .heat-legend { margin-top: 0; }
+.heat-range { display: flex; gap: 6px; }
+.chip-btn.small { position: relative; min-height: 28px; padding: 0 10px; font-size: 0.76rem; background: var(--fill); }
+.chip-btn.small[aria-pressed="true"] { background: var(--label); }
+.chip-btn.small::after { content: ""; position: absolute; inset: -8px -2px; } /* a 44 px tall tap */
+.pr { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--fuel-soft); color: var(--fuel-ink); font-size: 0.82rem; font-weight: 700; }
+.pr .i { width: 14px; height: 14px; }
+
+/* ---- Quick check-in ---- */
+.weigh-chips { display: flex; justify-content: center; gap: 8px; margin: 10px 0 4px; }
+.weigh-slide { display: block; width: 100%; height: 44px; margin: 4px 0 12px; accent-color: var(--effort); }
+.check-links { display: grid; gap: 2px; margin-top: 6px; }
+.check-links .btn { color: var(--label-2); }
+
+/* ---- Schedule rows, body maps, exercise library ---- */
+.how-train { gap: 12px; }
+.how-train .cell-title { flex: none; }
+.how-train .segmented { flex: 1; min-width: 0; margin: 0; }
+.plan-list .plan-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; }
+.plan-day { flex: none; width: 24px; font-size: 0.88rem; font-weight: 600; color: var(--label-2); }
+.plan-day.now { color: var(--effort-ink); }
+.bodymap { flex: none; width: 52px; height: auto; }
+.bm { fill: var(--fill-2); }
+.bm.on { fill: var(--effort); }
+.ex-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.ex-none { grid-column: 1 / -1; }
+.ex-card { display: grid; gap: 6px; padding: 10px; border-radius: var(--r-card); background: var(--cell); align-content: start; position: relative; }
+.ex-open { appearance: none; border: 0; background: none; padding: 0; margin: 0; display: grid; gap: 4px; text-align: left; cursor: pointer; color: inherit; min-width: 0; }
+.ex-thumb { display: grid; place-items: center; aspect-ratio: 1; border-radius: 14px; background: var(--cell-2); overflow: hidden; color: var(--label-3); }
+.ex-thumb .i { width: 36px; height: 36px; }
+.ex-thumb .ex-pic { width: 86%; height: auto; max-width: none; margin: 0; }
+.ex-card-name { margin-top: 4px; font-size: 0.94rem; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.ex-card-sub { font-size: 0.78rem; line-height: 1.3; color: var(--label-2); overflow-wrap: anywhere; }
+.ex-card > .icon-btn { margin-top: 2px; }
+.ex-hero { display: grid; place-items: center; margin: 0 0 8px; padding: 8px; border-radius: 16px; background: var(--cell); }
+.ex-hero .ex-pic { max-width: 220px; margin: 0; }
+
 /* ---- Press feedback ----
    It lands on touch-down: text controls dim at once and fade back on release, filled ones shrink a little. */
 .back, .strip-nav, .as-link, .segmented button { transition: opacity 0.2s ease; }

@@ -79,6 +79,16 @@
     await sheet('#main [data-act=shortcut-help]', 'iPhone shortcuts');
 
     click('[data-tab=train]'); check('train');
+    await sheet('#main [data-act=plan-open]', 'plan something');
+    click('#main [data-act=train-view][data-id=exercises]'); check('train: exercises');
+    click('#main [data-act=ex-part][data-id=Core]'); check('train: exercises, Core');
+    click('#main [data-act=ex-part][data-id=All]');
+    await sheet('#main [data-act=ex-new]', 'new exercise');
+    await sheet('#main [data-act=ex-detail]', 'exercise detail');
+    click('#main [data-act=train-view][data-id=schedule]');
+    click('#main [data-act=train-mode][data-id=rotation]'); check('train: rotation');
+    click('[data-tab=today]'); check('today: rotation');
+    click('[data-tab=train]'); click('#main [data-act=train-mode][data-id=fixed]');
     click('#main [data-act=week][data-n="7"]'); check('train, next week');
     // A logged session cannot move, so the move sheet is opened on one from next week.
     if (click('#main [data-act=open-session][data-id^=str], #main [data-act=open-session][data-id^=gym]')) {
@@ -121,7 +131,14 @@
     check('food: recipes, all open');
     click('#main [data-act=food-sec][data-id=menu]');
 
-    click('[data-tab=progress]'); check('progress: charts, 14 days');
+    // Progress opens on Overview: the streak, challenges, the grid by weeks and by months, records and the weight chart.
+    click('[data-tab=progress]'); click('#main [data-act=progress-view][data-id=overview]'); check('progress: overview');
+    click('#main [data-act=challenges-toggle]'); check('progress: overview, challenges open');
+    click('#main [data-act=heat-range][data-id=year]'); check('progress: overview, activity by year');
+    click('#main [data-act=heat-metric][data-id=volume]'); check('progress: overview, volume');
+    click('#main [data-act=heat-range][data-id="12w"]'); click('#main [data-act=heat-metric][data-id=time]');
+    for (const r of ['1M', '1Y', 'All']) { click(`#main [data-act=weight-range][data-id="${r}"]`); check(`progress: overview, weight ${r}`); }
+    click('#main [data-act=progress-view][data-id=charts]'); check('progress: charts, 14 days');
     click('#main [data-act=range][data-id="28"]'); check('progress: charts, 28 days');
     click('#main [data-act=range][data-id="14"]');
     click('#main [data-act=progress-view][data-id=health]'); check('progress: health checks');
@@ -134,6 +151,8 @@
     await sheet('#main [data-act=whats-new]', "what's new");
     click('[data-tab=today]');
     window.scrollTo(0, 0);
+  } catch (err) {
+    out.push(`ERROR after ${out.length} lines: ${err.message}`); // a stop part way is a finding, not a silent clean report
   } finally {
     if (clip) { delete clip.readText; delete clip.writeText; }
     delete navigator.share;
