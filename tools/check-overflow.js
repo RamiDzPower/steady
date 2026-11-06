@@ -80,12 +80,17 @@
 
     click('[data-tab=train]'); check('train');
     click('#main [data-act=week][data-n="7"]'); check('train, next week');
+    // A logged session cannot move, so the move sheet is opened on one from next week.
+    if (click('#main [data-act=open-session][data-id^=str], #main [data-act=open-session][data-id^=gym]')) {
+      await sheet('#main [data-act=move-open]', 'move to another day');
+      click('#main [data-act=close-session]');
+    }
     click('#main [data-act=week][data-n="-7"]');
     if (click('#main [data-act=open-session][data-id^=str], #main [data-act=open-session][data-id^=gym]')) {
       check('session: strength');
       if (running) out.push('SKIPPED  finish and session saved sheets: a session is running');
       else {
-        if ($('#main [data-act=start]')) { click('#main [data-act=start]'); check('session: strength, running'); }
+        if ($('#main [data-act=start]')) { click('#main [data-act=start]'); check('session: strength, running'); await sheet('#main [data-act=ex-swap-open]', 'swap exercise'); }
         if (click('#main [data-act=finish]')) {
           check('sheet: finish session');
           $('#sheet [data-form=finish]').requestSubmit();

@@ -751,6 +751,24 @@ body:has(> .under) .navbar { opacity: 0; }
 /* The moving session widens the page, and a clip on body or html goes to the viewport, which clips nothing. So #main spans the screen, with the column's gutters as padding, and clips there. */
 body:has(> .under) #main { max-width: none; margin: 0; padding-inline: max(16px, calc((100% - 600px) / 2 + 16px)); overflow-x: clip; }
 
+/* ---- Activity grid and the New best line ---- */
+.heat-card { padding: 14px; }
+.heat { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 4px; }
+.heat-cell { appearance: none; border: 0; padding: 0; margin: 0; display: block; position: relative; min-width: 0; aspect-ratio: 1; border-radius: 4px; background: var(--fill); }
+button.heat-cell { cursor: pointer; }
+button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* neighbouring squares meet halfway, so no tap lands in a gap */
+.heat-cell.l1 { background: color-mix(in srgb, var(--effort) 35%, var(--cell)); }
+.heat-cell.l2 { background: color-mix(in srgb, var(--effort) 58%, var(--cell)); }
+.heat-cell.l3 { background: color-mix(in srgb, var(--effort) 80%, var(--cell)); }
+.heat-cell.l4 { background: var(--effort); }
+.heat-cell.future { background: none; box-shadow: inset 0 0 0 1px var(--sep); opacity: 0.55; }
+.heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 10px; font-size: 0.76rem; color: var(--label-2); }
+.heat-legend .heat-cell { width: 12px; flex: none; }
+.heat-legend span:first-child { margin-right: 2px; }
+.heat-legend span:last-child { margin-left: 2px; }
+.ex-best { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.88rem; font-weight: 600; line-height: 1.35; color: var(--effort-ink); }
+.ex-best .i { width: 16px; height: 16px; }
+
 /* ---- Press feedback ----
    It lands on touch-down: text controls dim at once and fade back on release, filled ones shrink a little. */
 .back, .strip-nav, .as-link, .segmented button { transition: opacity 0.2s ease; }

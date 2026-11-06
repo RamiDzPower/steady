@@ -2,7 +2,7 @@ import * as L from './logic.js';
 import { icon } from './icons.js';
 import { summaryPdf } from './pdf.js';
 import {
-  EFFORT, EXERCISES, SESSIONS, BLOCKS, PROGRESSION, DELOAD, HOT, HOT_LONGWALK, WATCH_ALERT, MEALS, MENU_NOTE, PANTRY, FOOD_SAFETY,
+  EFFORT, EXERCISES, SWAPS, SESSIONS, BLOCKS, PROGRESSION, DELOAD, HOT, HOT_LONGWALK, WATCH_ALERT, MEALS, MENU_NOTE, PANTRY, FOOD_SAFETY,
   EATING_OUT, RULES, SAFETY, SLOTS, LABS, WAIST_TARGET, BP_NOTE, BP_CRISIS, REMINDERS, SHORTCUT_IN, SHORTCUT_OUT,
   APP_VERSION, CHANGES,
 } from './plan.js';
@@ -54,7 +54,7 @@ let back = null; // where the screen a session opened from was scrolled to, and 
 // ---------- Storage ----------
 function blank() {
   return {
-    v: 1, profile: null, days: {}, custom: [], shopping: {}, swaps: {}, excluded: [], repeats: [], skipHolds: [], autoHolds: [], holdChecked: null,
+    v: 1, profile: null, days: {}, custom: [], shopping: {}, swaps: {}, excluded: [], moves: [], repeats: [], skipHolds: [], autoHolds: [], holdChecked: null,
     labs: [], bp: [], waist: [], settings: { hotMonths: [3, 4, 5], loudBeep: false, reminders: {} }, lastBackup: null, active: null,
     seenVersion: 0,
   };
@@ -91,7 +91,7 @@ function save() {
 const rw = (date) => (state.days[date] ||= L.emptyDay());
 const tgt = (date) => L.targets(state.profile, L.weightOn(state, date));
 const reps = () => state.repeats || [];
-const sessionsOn = (date) => L.sessionsFor(state.profile.startDate, date, reps());
+const sessionsOn = (date) => L.sessionsFor(state.profile.startDate, date, reps(), state.moves || []);
 const posOn = (date) => L.planPosition(state.profile.startDate, date, reps());
 const nextLab = () => state.profile.nextLab || L.addDays(state.profile.startDate, 84);
 const isHot = (date) => (state.settings.hotMonths || []).includes(L.parse(date).getMonth() + 1);
@@ -326,7 +326,7 @@ function sessionRows(d, sessions, day) {
   if (!sessions.length) return `<div class="group"><div class="cell"><span class="tile gray">${icon('calendar-check')}</span><div class="cell-main"><div class="cell-text">Training starts on the plan start date. Week 1 is in Train.</div></div></div></div>`;
   return `<div class="group">${sessions.map((s) => {
     const done = day?.workouts?.filter((w) => w.id === s.id) ?? [];
-    const meta = s.kind === 'rest' ? s.how : `${s.minutes} min, ${EFFORT[s.effort].label.toLowerCase()}${s.reps ? `, ${s.reps} repeats` : ''}${s.deload ? ', easier week' : ''}`;
+    const meta = s.kind === 'rest' ? s.how : `${s.minutes} min, ${EFFORT[s.effort].label.toLowerCase()}${s.reps ? `, ${s.reps} repeats` : ''}${s.deload ? ', easier week' : ''}${s.movedFrom ? `, moved from ${dateText(s.movedFrom, { weekday: 'long' })}` : ''}`;
     const logged = done.length ? `. Logged ${done.map((w) => `${w.min} min`).join(' and ')}` : '';
     const tile = `<span class="tile ${s.kind === 'rest' ? 'gray' : 'effort'}">${icon(sessionIcon(s))}</span>`;
     const body = `<div class="cell-main"><div class="cell-title">${esc(s.name)}</div><div class="cell-sub">${esc(meta + logged)}</div></div>`;
@@ -447,7 +447,7 @@ function viewTrain() {
     const items = ss.length ? ss.map((s) => {
       if (s.kind === 'rest') return `<div class="line"><span class="line-name">${esc(s.name)}</span></div>`;
       const done = day?.workouts?.some((w) => w.id === s.id);
-      return `<button class="line as-link" data-act="open-session" data-id="${s.id}" data-date="${date}"><span class="line-name">${esc(s.name)}</span><span class="line-meta">${s.minutes} min</span>${done ? `<span class="accessory done">${icon('check-circle')}</span>` : `<span class="accessory">${icon('caret-right')}</span>`}</button>`;
+      return `<button class="line as-link" data-act="open-session" data-id="${s.id}" data-date="${date}"><span class="line-name">${esc(s.name)}</span><span class="line-meta">${s.movedFrom ? `${s.minutes} min, from ${esc(dateText(s.movedFrom, { weekday: 'short' }))}` : `${s.minutes} min`}</span>${done ? `<span class="accessory done">${icon('check-circle')}</span>` : `<span class="accessory">${icon('caret-right')}</span>`}</button>`;
     }).join('') : '<div class="line"><span class="line-name dim">Before the plan starts</span></div>';
     return `<div class="cell day-cell"><div class="date-badge${date === todayISO() ? ' now' : ''}"><span>${esc(dateText(date, { weekday: 'short' }))}</span><span class="num">${L.parse(date).getDate()}</span></div><div class="cell-main">${items}</div></div>`;
   }).join('')}</div>
@@ -470,7 +470,10 @@ function viewTrain() {
 // ---------- Session ----------
 function currentSession() {
   const { date, id } = ui.session;
-  return sessionsOn(date).find((x) => x.id === id) || { ...SESSIONS[id], id, minutes: SESSIONS[id].minutes || 30, reps: 5, exercises: SESSIONS[id].exercises };
+  const s = sessionsOn(date).find((x) => x.id === id) || { ...SESSIONS[id], id, minutes: SESSIONS[id].minutes || 30, reps: 5, exercises: SESSIONS[id].exercises };
+  const swap = isActive(date, id) ? state.active.swap : null;
+  // A swapped exercise keeps its slot's sets, reps and rest, so everything that reads the list sees the stand-in.
+  return swap && s.exercises ? { ...s, exercises: s.exercises.map((e, i) => (swap[i] ? [swap[i], ...e.slice(1)] : e)) } : s;
 }
 function isActive(date, id) {
   return !!state.active && state.active.date === date && state.active.id === id;
@@ -505,6 +508,7 @@ function viewSession() {
   const active = isActive(date, id) ? state.active : null;
   const logged = state.days[date]?.workouts?.map((w, i) => ({ w, i })).filter(({ w }) => w.id === id) ?? [];
   const otherActive = state.active && !active;
+  const movable = !active && !logged.length && s.id !== 'walks' && s.kind !== 'rest' && sessionsOn(date).some((x) => x.id === id);
   const hot = isHot(date) && (s.kind === 'cardio' || s.outdoor);
   // The rest bar stays outside the part an edge swipe moves, as a moved parent would pin the fixed bar to itself.
   return `<div class="pushed">
@@ -523,6 +527,7 @@ function viewSession() {
     : `<div class="start-row"><button class="btn-start" data-act="start">${icon('play')}Start</button>${s.id === 'walks'
       ? '<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
       : `<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}
+  ${movable ? `<div class="group actions-group"><button class="cell cell-action" data-act="move-open">${icon('calendar-plus')}<span>Move to another day</span></button></div>${s.movedFrom ? foot(`Moved from ${esc(dateText(s.movedFrom))}. It still counts for its own week's plan.`) : ''}` : ''}
   ${s.id === 'intervals' && active ? '<div class="card phase" id="phase"></div>' : ''}
   ${s.id === 'intervals' ? foot(`Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.`) : ''}
   ${s.exercises ? `<div class="exlist">${s.exercises.map(([exId, sets, spec, rest], i) => exerciseCard(exId, sets, spec, rest, i, active)).join('')}</div>${foot(esc(PROGRESSION))}` : ''}
@@ -542,15 +547,22 @@ function exerciseCard(exId, sets, spec, rest, i, active) {
   const kg = active?.log?.[i]?.kg ?? last?.kg ?? '';
   const rp = active?.log?.[i]?.reps ?? last?.reps ?? L.repSpec(spec).top ?? '';
   const held = active && ui.hold?.i === i ? ui.hold.k : -1;
+  const orig = SESSIONS[ui.session.id]?.exercises?.[i]?.[0];
+  const swapped = !!orig && orig !== exId;
+  const kgNow = Number(active?.log?.[i]?.kg) || 0;
+  const best = active && done > 0 && kgNow > 0 ? L.bestKg(state, exId, ui.session.date) : null;
   return `<section class="card ex"><div class="ex-head"><span class="ex-num num">${i + 1}</span><div><h3 class="ex-name">${esc(ex.name)}</h3><p class="ex-meta">${sets} sets of ${esc(spec)}, ${rest} s rest</p></div></div>
     ${ex.pic ? `<img class="ex-pic" src="img/ex/${esc(ex.pic)}.svg" alt="" width="512" height="512">` : ''}
     <p class="cue">${esc(ex.cue)}</p><p class="ex-alt">${esc(ex.alt)}</p>
+    ${swapped ? `<p class="ex-alt">Swapped in for ${esc(EXERCISES[orig].name)}.</p>` : ''}
     ${last ? `<p class="ex-last">Last time, ${esc(short(last.date))}: ${last.kg ? `${last.kg} kg, ` : ''}${last.reps ?? '?'} ${unitLabel.toLowerCase()}, ${last.sets} of ${last.planned} sets. ${esc(hint)}</p>` : ''}
+    ${best != null && kgNow > best ? `<p class="ex-best" role="status">${icon('flame')}New best: ${kgNow} kg, up from ${best} kg.</p>` : ''}
     <div class="ex-log">
       <label class="pill-field"><span>kg</span><input inputmode="decimal" data-act="ex-kg" data-i="${i}" value="${esc(kg)}" placeholder="body" autocomplete="off"></label>
       <label class="pill-field"><span>${unitLabel}</span><input inputmode="numeric" data-act="ex-reps" data-i="${i}" value="${esc(rp)}" autocomplete="off"></label>
     </div>
     <div class="sets">${Array.from({ length: sets }, (_, k) => `<button class="setbtn num" data-act="set" data-i="${i}" data-k="${k}" aria-pressed="${k < done}" aria-label="Set ${k + 1}${k === held ? ', holding' : ''}">${k < done ? icon('check') : k === held ? icon('timer') : k + 1}<label class="tap" aria-hidden="true"><input type="checkbox" switch></label></button>`).join('')}
+      ${active && done === 0 && (SWAPS[exId] || swapped) ? `<button class="btn btn-gray btn-sm" data-act="ex-swap-open" data-i="${i}">${icon('arrows-left-right')}Swap</button>` : ''}
       <button class="btn btn-gray btn-sm" data-act="rest" data-i="${i}" data-sec="${rest}">${icon('timer')}Rest ${rest} s</button></div></section>`;
 }
 
@@ -888,6 +900,36 @@ function foodListItems(query) {
   return parts.join('') || '<div class="cell"><div class="cell-main"><div class="cell-sub">Nothing matches. Add it under Something else.</div></div></div>';
 }
 
+function sheetMove() {
+  const { date, id } = ui.session;
+  const s = currentSession();
+  const days = L.moveTargets(state, id, date, todayISO());
+  const today = todayISO();
+  const row = (d, label, sub, home = false) => `<button class="cell cell-button" data-act="move-to" data-date="${d}">${home ? `<span class="tile gray">${icon('arrow-u-up-left')}</span>` : ''}
+      <div class="cell-main"><div class="cell-title">${esc(label)}</div>${sub ? `<div class="cell-sub">${esc(sub)}</div>` : ''}</div><span class="accessory">${icon('caret-right')}</span></button>`;
+  const names = (d) => sessionsOn(d).filter((x) => x.kind !== 'rest' && x.id !== 'walks').map((x) => x.name);
+  const label = (d) => (d === today ? 'Today' : d === L.addDays(today, 1) ? 'Tomorrow' : dateText(d, { weekday: 'long' }));
+  return `<div class="sheet">${sheetHead(`Move ${esc(s.name)}`)}
+    ${foot(`Now on ${esc(dateText(date))}. Pick the day you will do it.`)}
+    <div class="group">${s.movedFrom ? row(s.movedFrom, `Back to ${dateText(s.movedFrom, { weekday: 'long' })}`, 'Where the plan has it', true) : ''}
+      ${days.filter((d) => d !== s.movedFrom).map((d) => { const other = names(d); return row(d, `${label(d)}, ${short(d)}`, other.length ? `Also planned: ${other.join(', ')}` : 'Nothing else planned'); }).join('')}</div>
+    ${foot('Only this one workout moves. The rest of the week stays as planned.')}</div>`;
+}
+
+function sheetExSwap(i) {
+  const orig = SESSIONS[ui.session.id].exercises[i][0];
+  const here = currentSession().exercises;
+  const cur = here[i][0];
+  // Another slot already holds the stand-in, so the choices leave those out: a session logs each exercise once.
+  const taken = new Set(here.map((e) => e[0]));
+  const opts = [...new Set([orig, ...(SWAPS[orig] || []), ...(SWAPS[cur] || [])])].filter((id) => id !== cur && (id === orig || !taken.has(id)));
+  const first = (t) => t.split('. ')[0].replace(/\.$/, '') + '.';
+  return `<div class="sheet">${sheetHead('Swap exercise')}
+    ${foot(`This slot is ${here[i][1]} sets of ${esc(here[i][2])} with ${here[i][3]} s rest. The stand-in uses the same sets, reps and rest.`)}
+    <div class="group sheet-list">${opts.map((id) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(EXERCISES[id].name)}${id === orig ? ' (the plan)' : ''}</div><div class="cell-sub">${esc(first(EXERCISES[id].cue))}</div></div>
+      <button class="btn btn-gray btn-sm" data-act="ex-swap-set" data-i="${i}" data-id="${id}">Use</button></div>`).join('')}</div></div>`;
+}
+
 function sheetSwap(date, key, slot) {
   const current = L.menuFor(date, state).find((x) => x.key === key);
   const opts = L.swapOptions(slot, state.excluded);
@@ -1123,6 +1165,28 @@ function viewProgress() {
   ${ui.progress === 'health' ? viewHealth() : viewCharts()}`;
 }
 
+// The last 12 weeks as a grid, one square a day, shaded by exercise minutes, with lifetime totals under it.
+function activityCard() {
+  const today = todayISO();
+  const g = L.activityGrid(state, today);
+  const t = L.totals(state, today);
+  const tipOf = (c) => `${dateText(c.date, { weekday: 'short', day: 'numeric', month: 'short' })}: ${c.min ? `${c.min} min of exercise` : 'no exercise logged'}`;
+  const cell = (c) => (c.future ? '<span class="heat-cell future"></span>' : `<button class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}" aria-label="${esc(tipOf(c))}"></button>`);
+  const tile = (num, label, sub) => `<div class="tile-card"><span class="tile-num num">${num}</span><span class="tile-label">${label}</span><span class="tile-sub">${sub}</span></div>`;
+  return `${sectionHead('Activity', g.counted ? `${g.active} of ${g.counted} days` : '')}
+  <section class="card heat-card" aria-label="Exercise for each of the last 12 weeks">
+    <div class="heat">${g.cols.map((col) => col.map(cell).join('')).join('')}</div>
+    <div class="heat-legend" aria-hidden="true"><span>Less</span>${[0, 1, 2, 3, 4].map((l) => `<i class="heat-cell l${l}"></i>`).join('')}<span>More</span></div>
+    ${foot(`Weeks of ${esc(short(g.cols[0][0].date))} to ${esc(short(g.cols[11][0].date))}, one column a week, Monday at the top. Tap a square for its minutes.`)}
+  </section>
+  <div class="tiles">
+    ${tile(fmt(t.sessions), 'Workouts', 'Not counting the daily walks')}
+    ${tile(fmt(t.thisMonth), 'This month', esc(dateText(today, { month: 'long' })))}
+    ${tile(fmt(t.activeDays), 'Active days', 'With any exercise')}
+    ${tile(`${fmt(t.liftedKg)} <span class="big-unit">kg</span>`, 'Lifted', 'Weight times reps times sets')}
+  </div>`;
+}
+
 function viewCharts() {
   const p = state.profile;
   const today = todayISO();
@@ -1165,6 +1229,7 @@ function viewCharts() {
   ${weightChart()}
   ${vo2Chart()}
   ${milestoneList(ms)}
+  ${activityCard()}
   ${sectionHead('Week by week')}
   <div class="card table-card"><div class="scroll-x"><table class="tbl"><thead><tr><th>Week of</th><th>Sessions</th><th>Ex min</th><th>Load</th><th>Steps</th><th>kcal</th><th>Protein</th><th>Water L</th><th>In minus out</th><th>Weight</th></tr></thead><tbody>
   ${mondays.slice().reverse().map((m) => {
@@ -1816,6 +1881,38 @@ const ACT = {
     render();
     toast(id ? `Swapped in ${L.MEAL_BY_ID[id].name}` : 'Back to the plan', true);
   },
+  'move-open': () => showSheet(sheetMove()),
+  'ex-swap-open': (el) => {
+    if (state.active?.sets?.[Number(el.dataset.i)]) return; // sets are already ticked for this one
+    showSheet(sheetExSwap(Number(el.dataset.i)));
+  },
+  'ex-swap-set': (el) => {
+    const i = Number(el.dataset.i);
+    const { id } = ui.session;
+    const orig = SESSIONS[id].exercises[i][0];
+    if (!isActive(ui.session.date, id) || state.active.sets?.[i]) return closeSheet();
+    snapshot();
+    const swap = { ...(state.active.swap || {}) };
+    if (el.dataset.id === orig) delete swap[i]; else swap[i] = el.dataset.id;
+    state.active.swap = swap;
+    delete state.active.log[i]; // the typed weight and reps belonged to the other exercise
+    ui.hold = ui.hold?.i === i ? null : ui.hold;
+    save();
+    closeSheet();
+    render();
+    toast(el.dataset.id === orig ? `Back to ${EXERCISES[orig].name}` : `Swapped for ${EXERCISES[el.dataset.id].name}`, true);
+  },
+  'move-to': (el) => {
+    const { date, id } = ui.session;
+    const to = el.dataset.date;
+    snapshot();
+    state.moves = L.applyMove(state.moves || [], id, date, to);
+    save();
+    closeSheet();
+    // The session is no longer on this day, so the screen goes back to the list it came from.
+    ACT['close-session']();
+    toast(`Moved to ${dateText(to, { weekday: 'long' })}`, true);
+  },
   exclude: (el) => {
     snapshot();
     state.excluded = [...new Set([...(state.excluded || []), el.dataset.id])];
@@ -2158,7 +2255,7 @@ function exLog(el, key, value) {
   const i = Number(el.dataset.i);
   state.active.log[i] = { ...(state.active.log[i] ?? {}), [key]: value };
   save();
-  if (started) renderWhenIdle(); // the screen shows the session running once the keyboard is done
+  if (started || (key === 'kg' && state.active.sets?.[i])) renderWhenIdle(); // the session running, or the New best line, once the keyboard is done
   if (note) toast(note, true, true);
 }
 
@@ -2446,7 +2543,7 @@ async function importFile(input, kind) {
 $('.tabs').innerHTML = TABS.map(([id, label, ic]) => `<button type="button" data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`).join('');
 
 // One-shot actions, toggles, remove buttons and forms, the app's idempotency keys: a repeat within 600 ms is the same tap, so a double tap on a button neither switches a toggle back nor removes the row that moves up, and a second tap on Undo or the flash, which stop taking taps, cannot reach what lies under them. Ticks and switches are not guarded. Taps meant to add up, like +250 ml, stay out.
-const ONCE = new Set(['finish', 'quick-log', 'add-food', 'add-recent', 'same-yesterday', 'exclude', 'shop-share', 'doctor-pdf', 'hold-done', 'rest-skip',
+const ONCE = new Set(['move-to', 'ex-swap-set', 'finish', 'quick-log', 'add-food', 'add-recent', 'same-yesterday', 'exclude', 'shop-share', 'doctor-pdf', 'hold-done', 'rest-skip',
   'use-limit', 'log-menu', 'repeat-week', 'pause', 'food-del', 'workout-del', 'health-del', 'include', 'undo', 'flash-hide',
   'log-day', 'shop-clear', 'water-undo', 'swap-set', 'skip-hold', 'discard',
   'form:finish', 'form:quick', 'form:weigh', 'form:paste', 'form:bp', 'form:waist']);

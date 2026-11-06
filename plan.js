@@ -95,6 +95,15 @@ export const SESSIONS = {
   },
 };
 
+// When a machine or a bench is taken, these stand in for an exercise that is counted in reps. Sets, reps and rest stay as planned.
+export const SWAPS = {
+  sitstand: ['goblet', 'stepup'], wallpush: ['inclinepush', 'bprow'], bridge: ['hipthrust', 'rdl'], bprow: ['onearmrow', 'cablerow'],
+  goblet: ['legpress', 'stepup'], inclinepush: ['chestpress', 'wallpush'], splitsquat: ['stepup', 'goblet'], deadbug: ['pallof'],
+  hipthrust: ['bridge', 'rdl'], rdl: ['hipthrust', 'legcurl'], onearmrow: ['cablerow', 'pulldown'], stepup: ['splitsquat', 'legpress'],
+  legpress: ['goblet', 'stepup'], chestpress: ['inclinepush', 'shoulderpress'], pulldown: ['cablerow', 'onearmrow'],
+  cablerow: ['pulldown', 'onearmrow'], shoulderpress: ['chestpress', 'inclinepush'], legcurl: ['rdl', 'bridge'], pallof: ['deadbug'],
+};
+
 export const PROGRESSION = 'When every set reaches the top of the rep range with 2 reps still in the tank, add a little weight next time: a book in the backpack, or the next step on the machine.';
 export const DELOAD = 'Easier week: about a third less cardio and one set fewer, so your body catches up. Plan one every fourth week from week 16.';
 export const HOT = 'Hot season. Train indoors, or outdoors before 08:00 or after 19:00, and drink 500 ml before you start.';
@@ -522,8 +531,17 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 6;
+export const APP_VERSION = 7;
 export const CHANGES = [
+  {
+    version: 7,
+    notes: [
+      'Move a workout to another day from its screen. The week still counts it.',
+      'Machine taken? Swap an exercise for a similar one while you train, and Steady keeps the sets and reps.',
+      'A New best badge appears as soon as you lift more than you ever have.',
+      'Progress has an activity grid for the last 12 weeks, plus your totals.',
+    ],
+  },
   {
     version: 6,
     notes: [

@@ -62,7 +62,7 @@ export function checkIn(startDate, date) {
   return CHECKINS[w] ? { week: w, text: CHECKINS[w] } : null;
 }
 
-export function sessionsFor(startDate, date, repeats = []) {
+function plannedSessions(startDate, date, repeats) {
   const pos = planPosition(startDate, date, repeats);
   if (pos.before) return [];
   return pos.block.days[weekday(date)].map((e) => {
@@ -82,6 +82,42 @@ export function sessionsFor(startDate, date, repeats = []) {
     }
     return { ...base, id: e.s, minutes, reps, exercises, deload: easier };
   });
+}
+
+// moves: { id, from, to } entries. A moved session leaves its planned day and shows on the new one, planned as it was for its own week.
+export function sessionsFor(startDate, date, repeats = [], moves = []) {
+  const out = plannedSessions(startDate, date, repeats);
+  for (const m of moves) {
+    if (m.from !== date) continue;
+    const i = out.findIndex((x) => x.id === m.id);
+    if (i >= 0) out.splice(i, 1);
+  }
+  for (const m of moves) {
+    if (m.to !== date || m.from === date) continue;
+    const moved = plannedSessions(startDate, m.from, repeats).find((x) => x.id === m.id);
+    if (moved) out.push({ ...moved, movedFrom: m.from });
+  }
+  return out;
+}
+
+// The moves after putting session `id`, now on `at`, on `to`. Moving it back to its planned day removes the move.
+export function applyMove(moves, id, at, to) {
+  const list = moves.map((m) => ({ ...m }));
+  const own = list.find((m) => m.id === id && m.to === at);
+  if (own) {
+    if (own.from === to) return list.filter((m) => m !== own);
+    own.to = to;
+    return list;
+  }
+  if (at === to) return list;
+  list.push({ id, from: at, to });
+  return list.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0)).slice(-60);
+}
+
+// Seven days from `today` where a session on `at` could go, nearest first, each with whether it already holds one of the same.
+export function moveTargets(state, id, at, today) {
+  const start = today < state.profile.startDate ? state.profile.startDate : today;
+  return Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter((d) => d !== at);
 }
 
 export function plannedMinutes(sessions) {
@@ -191,7 +227,7 @@ export function weekSummary(state, monday, n = 7) {
   for (let i = 0; i < n; i++) {
     const date = addDays(monday, i);
     const day = state.days[date];
-    const planned = sessionsFor(p.startDate, date, reps).filter((s) => s.kind !== 'rest');
+    const planned = sessionsFor(p.startDate, date, reps, state.moves || []).filter((s) => s.kind !== 'rest');
     out.planned += planned.length;
     out.done += planned.filter((s) => day?.workouts?.some((w) => w.id === s.id)).length;
     out.strengthDone += (day?.workouts ?? []).filter((w) => SESSIONS[w.id]?.kind === 'strength').length;
@@ -667,11 +703,56 @@ export function heavierLifts(state, ex, date) {
     return e.kg && e.sets && last?.kg && e.kg > last.kg ? [{ id: e.id, kg: e.kg, was: last.kg }] : [];
   });
 }
+// The most weight ever logged for an exercise on a day before `date`, or null when it has never been logged with a weight.
+export function bestKg(state, exId, date) {
+  let best = null;
+  for (const [d, day] of Object.entries(state.days)) {
+    if (d >= date) continue;
+    for (const w of day.workouts ?? []) for (const e of w.ex ?? []) if (e.id === exId && e.kg > 0 && e.sets && (best == null || e.kg > best)) best = e.kg;
+  }
+  return best;
+}
+
+// The last `weeks` weeks as columns that start on Monday, ending with the week of `today`.
+// Each day has its exercise minutes and a level from 0 (nothing) to 4; days after today are marked `future`.
+export function activityGrid(state, today, weeks = 12) {
+  const first = addDays(mondayOf(today), -7 * (weeks - 1));
+  const cols = [];
+  let active = 0, counted = 0;
+  for (let w = 0; w < weeks; w++) {
+    const col = [];
+    for (let d = 0; d < 7; d++) {
+      const date = addDays(first, w * 7 + d);
+      const future = date > today;
+      const min = future ? 0 : effortMinutes(state.days[date]);
+      const level = !min ? 0 : min < 20 ? 1 : min < 40 ? 2 : min < 70 ? 3 : 4;
+      if (!future && date >= (state.profile?.startDate ?? first)) { counted++; if (min) active++; }
+      col.push({ date, min, level, future });
+    }
+    cols.push(col);
+  }
+  return { cols, active, counted };
+}
+
+// Lifetime numbers: sessions (not the daily walks), this month's, active days, and the weight lifted in logged sets.
+export function totals(state, today) {
+  const month = today.slice(0, 7);
+  let sessions = 0, thisMonth = 0, activeDays = 0, liftedKg = 0;
+  for (const [d, day] of Object.entries(state.days)) {
+    if (d > today) continue;
+    if (effortMinutes(day)) activeDays++;
+    for (const w of day.workouts ?? []) {
+      if (w.id !== 'walks') { sessions++; if (d.startsWith(month)) thisMonth++; }
+      for (const e of w.ex ?? []) if (e.kg > 0 && e.reps > 0 && e.sets > 0) liftedKg += e.kg * e.reps * e.sets;
+    }
+  }
+  return { sessions, thisMonth, activeDays, liftedKg: Math.round(liftedKg) };
+}
 // The first planned session on or after `from` that is not a rest day or the daily walks, and is not logged yet.
 export function nextSession(state, from) {
   for (let i = 0; i < 14; i++) {
     const date = addDays(from, i);
-    const s = sessionsFor(state.profile.startDate, date, state.repeats || [])
+    const s = sessionsFor(state.profile.startDate, date, state.repeats || [], state.moves || [])
       .find((x) => x.kind !== 'rest' && x.id !== 'walks' && !state.days[date]?.workouts?.some((w) => w.id === x.id));
     if (s) return { date, session: s };
   }
@@ -1023,9 +1104,10 @@ export function cleanBackup(data) {
     if (!DATE.test(d) || !s || typeof s !== 'object') continue;
     for (const [k, id] of Object.entries(s)) if (/^(breakfast|lunch|dinner|snack\d)$/.test(k) && MEAL_BY_ID[id]) (swaps[d] ||= {})[k] = id;
   }
+  const moves = arr(data.moves, 60).flatMap((m) => (m && typeof m.id === 'string' && Object.hasOwn(SESSIONS, m.id) && SESSIONS[m.id].kind !== 'rest' && DATE.test(m.from) && DATE.test(m.to) && m.from !== m.to ? [{ id: m.id, from: m.from, to: m.to }] : []));
   const excluded = [...new Set(arr(data.excluded, 100).filter((id) => typeof id === 'string' && MEAL_BY_ID[id]))];
   return {
-    v: 1, profile, days, custom, shopping, swaps, excluded,
+    v: 1, profile, days, custom, shopping, swaps, excluded, moves,
     repeats: dates(data.repeats), skipHolds: dates(data.skipHolds), autoHolds: dates(data.autoHolds), holdChecked: DATE.test(data.holdChecked) ? data.holdChecked : null,
     labs: cleanLabs(data.labs), bp: cleanBp(data.bp), waist: cleanWaist(data.waist), settings: cleanSettings(data.settings),
     lastBackup: DATE.test(data.lastBackup) ? data.lastBackup : null, seenVersion: num(data.seenVersion, 0, 1000) ?? 0,
