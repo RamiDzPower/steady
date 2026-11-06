@@ -28,7 +28,7 @@ const flagText = (tags) => `${tags?.includes('sugary') ? ', sugary drink' : ''}$
 const foodSub = (f, per = '', fib = true) => `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${fib ? `, ${fmt(f.fib || 0)} g fibre` : ''}${per}${flagText(f.tags)}`;
 const DEFAULT_RPE = { easy: 4, moderate: 5, hard: 7, strength: 7 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'chart-line-up'], ['more', 'More', 'dots-three-circle']];
+const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'trend-up'], ['more', 'More', 'dots-three-circle']];
 const SESSION_ICON = { walks: 'person-simple-walk', longwalk: 'footprints', cardio: 'heartbeat', intervals: 'timer', rest: 'bed' };
 const sessionIcon = (s) => SESSION_ICON[s.id] || (s.kind === 'strength' ? 'barbell' : 'heartbeat');
 const CLOSE_BTN = `<button class="icon-btn" data-act="sheet-close" aria-label="Close">${icon('x')}</button>`;
@@ -132,6 +132,7 @@ function render(top = false) {
   }
   observeTitle();
   keepChip(chipX);
+  if (ui.foodScroll) { ui.foodScroll = false; $('#food-today')?.scrollIntoView({ block: 'start' }); window.scrollBy(0, -8); }
   if (swipe?.under && ui.screen === 'session') reswipe();
 }
 // As on iOS only a session's push and pop slide; tabs, and browsers without view transitions, switch at once.
@@ -527,8 +528,8 @@ function sheetExDetail(id) {
   const e = exInfo(id);
   const last = L.lastStrength(state, id, '9999-12-31');
   const best = L.bestKg(state, id, '9999-12-31');
-  let times = 0;
-  for (const day of Object.values(state.days)) for (const w of day.workouts ?? []) if (w.ex?.some((x) => x.id === id && x.sets > 0)) times++;
+  let times = 0, mostReps = 0;
+  for (const day of Object.values(state.days)) for (const w of day.workouts ?? []) if (w.ex?.some((x) => x.id === id && x.sets > 0)) { times++; for (const x of w.ex) if (x.id === id) mostReps = Math.max(mostReps, x.reps ?? 0); }
   const running = state.active && SESSIONS[state.active.id]?.exercises;
   return `<div class="sheet">${sheetHead(esc(e.name))}
     ${e.pic ? `<div class="ex-hero"><img class="ex-pic" src="img/ex/${esc(e.pic)}.svg" alt="" width="512" height="512"></div>` : ''}
@@ -538,7 +539,7 @@ function sheetExDetail(id) {
     <div class="group">
       <div class="cell"><div class="cell-main"><div class="cell-title">Logged in</div></div><span class="cell-value">${times ? plural(times, 'workout', 'workouts') : 'not yet'}</span></div>
       <div class="cell"><div class="cell-main"><div class="cell-title">Last time</div></div><span class="cell-value">${last ? `${esc(short(last.date))}, ${last.kg ? `${last.kg} kg × ` : ''}${last.reps ?? '?'}` : 'not yet'}</span></div>
-      <div class="cell"><div class="cell-main"><div class="cell-title">Heaviest</div></div><span class="cell-value">${best ? `${best} kg` : 'no weight logged'}</span></div>
+      <div class="cell"><div class="cell-main"><div class="cell-title">${best || !mostReps ? 'Heaviest' : 'Most reps'}</div></div><span class="cell-value">${best ? `${best} kg` : mostReps ? `${mostReps}` : 'no weight logged'}</span></div>
     </div>
     <div class="group actions-group">
       ${running ? `<button class="cell cell-action" data-act="ex-add" data-id="${esc(id)}">${icon('plus-circle')}<span>Add to the running workout</span></button>` : ''}
@@ -919,7 +920,7 @@ function viewFood() {
   const monday = foodMonday();
   const cap = weekly ? `Menu ${L.menuIndex(state.profile.startDate, monday) + 1} of 3, week of ${esc(short(monday))}` : 'Recipes, eating out and the rules';
   return `${nav('Food', cap)}
-  <div class="chips" role="group" aria-label="Food sections">${FOOD_SECTIONS.map(([k, label, ic]) => `<button class="chip-btn" data-act="food-sec" data-id="${k}" aria-pressed="${ui.food === k}">${icon(ic)}${label}</button>`).join('')}</div>
+  ${weekly ? segmented('food-sec', [['menu', 'Menu'], ['prep', 'Prep'], ['shopping', 'Shopping']], ui.food, 'Food sections') : `<div class="back-row"><button class="back" data-act="food-sec" data-id="menu">${icon('caret-left')}<span>Menu</span></button></div>`}
   ${weekly ? segmented('food-week', [['this', 'This week'], ['next', 'Next week']], ui.foodWeek, 'Which week') : ''}
   ${body}`;
 }
@@ -939,10 +940,12 @@ function foodMenu() {
     const date = L.addDays(monday, i);
     const items = L.menuFor(date, state);
     const tot = L.mealTotals(items.map((x) => x.meal));
-    return `${sectionHead(esc(dateText(date, { weekday: 'long', day: 'numeric', month: 'short' })), `${fmt(tot.kcal)} kcal, ${tot.p} g protein`)}
+    return `<div${date === todayISO() ? ' id="food-today"' : ''}></div>${sectionHead(esc(dateText(date, { weekday: 'long', day: 'numeric', month: 'short' })), `${fmt(tot.kcal)} kcal, ${tot.p} g protein`)}
       <div class="group">${items.map(({ key, slot, meal, swapped }) => `<div class="cell"><button class="cell-main as-link" data-act="recipe" data-id="${meal.id}"><span class="cell-title">${esc(meal.name)}</span><span class="cell-sub">${SLOT_LABEL[slot]}, ${meal.kcal} kcal${swapped ? ', swapped in' : ''}</span></button>
         <button class="icon-btn" data-act="swap-open" data-date="${date}" data-key="${key}" data-slot="${slot}" aria-label="Swap ${esc(meal.name)}">${icon('arrows-left-right')}</button></div>`).join('')}</div>`;
   }).join('')}
+  ${sectionHead('Guides')}
+  <div class="group">${FOOD_SECTIONS.slice(3).map(([k, label, ic]) => `<button class="cell cell-button" data-act="food-sec" data-id="${k}"><span class="tile fuel">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${label}</div></div><span class="accessory">${icon('caret-right')}</span></button>`).join('')}</div>
   ${off.length ? `${sectionHead('Not suggested')}<div class="group">${off.map((m) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(m.name)}</div><div class="cell-sub">${SLOT_LABEL[m.slot]}, ${m.kcal} kcal</div></div>
       <button class="btn btn-gray btn-sm" data-act="include" data-id="${esc(m.id)}" aria-label="Suggest again: ${esc(m.name)}">Suggest again</button></div>`).join('')}</div>
     ${foot('These stay out of the menus, the prep plan and the shopping list. A similar meal takes their place.')}` : ''}`;
@@ -1299,7 +1302,7 @@ function weightTiles(items) {
   return `<div class="tiles">
     ${tile(kg(now ? signedDec(now[1] - p.startWeight) : '0.0'), 'Since start', now ? `From ${p.startWeight.toFixed(1)} kg` : 'No weigh-ins yet')}
     ${tile(rate == null ? 'Not yet' : kg(signedDec(rate, 2)), 'Per week', rate == null ? 'After 3 weigh-ins over 2 weeks' : 'Over the last 4 weeks')}
-    ${tile(!next || n === 0 ? 'Reached' : rate == null ? 'Too early to tell' : n == null ? 'No date yet' : `About ${L.durationText(n)}`, 'Next milestone', shown ? `${shown.kg.toFixed(1)} kg${next && n ? ' at this pace' : ''}` : '')}
+    ${tile(!next || n === 0 ? 'Reached' : rate == null ? 'Too early to tell' : n == null ? 'No date yet' : L.durationText(n).replace(/^(\d+) (\w+)$/, '$1 <span class="big-unit">$2</span>'), 'Next milestone', shown ? `${shown.kg.toFixed(1)} kg${next && n ? ' at this pace' : ''}` : '')}
     ${tile(L.streakInfo(state, today).current, 'Weeks in a row', 'At half the plan or more')}
   </div>`;
 }
@@ -1363,11 +1366,16 @@ function weightHero() {
     const d = pts.map(([dt, v], i) => `${i ? 'L' : 'M'}${(2 + (296 * L.diffDays(pts[0][0], dt)) / span).toFixed(1)},${(4 + 44 * (1 - (v - lo) / (hi - lo || 1))).toFixed(1)}`).join('');
     spark = `<svg class="spark" viewBox="0 0 300 52" preserveAspectRatio="none" aria-hidden="true"><path class="l-weight" d="${d}"/></svg>`;
   }
+  const ms = L.milestones(state, today).filter((m) => m.kg != null);
+  const next = ms.find((m) => !m.done);
+  const rate = L.weightRate(state, today).kgPerWeek;
+  const eta = next && last ? L.etaDays(last, rate == null ? null : rate / 7, next.kg, today) : null;
   const sub = w30 == null ? 'The 30-day change shows after 2 weeks of weigh-ins.' : `${signedDec(w30)} kg in 30 days, on the trend line.`;
+  const nextLine = next ? `Next: ${next.kg.toFixed(1)} kg${eta ? `, about ${L.durationText(eta)} at this pace` : ''}.` : ms.length ? 'Every weight milestone is reached.' : '';
   return `<section class="card weight-hero" aria-label="Body weight">
     <p class="streak-cap">Body weight</p>
     <p class="hero-num">${last ? `<span class="num">${last[1].toFixed(1)}</span> <span class="big-unit">kg</span>` : '<span class="hero-none">No weigh-ins yet</span>'}</p>
-    <p class="hero-sub">${esc(sub)}</p>${spark}
+    <p class="hero-sub">${esc(sub)}${nextLine ? `<br>${esc(nextLine)}` : ''}</p>${spark}
     <div class="btn-row"><button class="btn btn-fill btn-sm" data-act="weigh-open">${icon('plus')}Log weight</button><button class="btn btn-gray btn-sm" data-act="progress-view" data-id="charts">See chart</button></div>
   </section>`;
 }
@@ -1379,7 +1387,6 @@ function viewGoals() {
   return `<div class="tiles">
     ${tileCard(fmt(t.sessions), 'Workouts', 'Not counting the daily walks')}
     ${tileCard(fmt(t.thisMonth), 'This month', esc(dateText(today, { month: 'long' })))}
-    ${tileCard(`${fmt(t.liftedKg)} <span class="big-unit">kg</span>`, 'Lifted in total', 'Weight times reps times sets')}
     ${tileCard(L.streakInfo(state, today).current, 'Weeks in a row', 'At half the plan or more')}
   </div>
   ${challengesCard(today)}
@@ -1425,7 +1432,7 @@ function activityCard() {
   const vol = ui.heatMetric === 'volume';
   const g = L.activityGrid(state, today, weeks, ui.heatMetric);
   const tipOf = (c) => `${dateText(c.date, { weekday: 'short', day: 'numeric', month: 'short' })}: ${vol ? (c.vol ? `${fmt(c.vol)} kg lifted` : 'no lifting') : (c.min ? `${c.min} min of exercise` : 'no exercise logged')}`;
-  const cell = (c) => (c.future ? '<span class="heat-cell future"></span>' : year ? `<span class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}"></span>` : `<button class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}" aria-label="${esc(tipOf(c))}"></button>`);
+  const cell = (c) => (c.future ? '<span class="heat-cell future"></span>' : year ? `<span class="heat-cell l${c.level}" data-m="${c.date.slice(0, 7)}" data-n="${(vol ? c.vol : c.min) || 0}" data-unit="${vol ? 'kg lifted' : 'min of exercise'}"></span>` : `<button class="heat-cell l${c.level}" data-tip="${esc(tipOf(c))}" aria-label="${esc(tipOf(c))}"></button>`);
   const at = Object.fromEntries(g.months.map((m) => [m.col, m.month]));
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const labels = g.cols.map((_, i) => `<span class="heat-month">${at[i] && (year || i < weeks - 1) ? MONTHS[at[i] - 1] : ''}</span>`).join('');
@@ -1466,13 +1473,14 @@ function viewCharts() {
   // Rows with a target show the week as a bar, as Train does; no bar without data or a target.
   const bar = (value, target, kind) => (value != null && target > 0 ? minibar(value, target, kind, 300) : '');
   return `${sectionHead('Body weight', `<button class="btn btn-gray btn-sm" data-act="weigh-open">${icon('plus')}Log weight</button>`)}
-  ${segmented('weight-range', [['1M', '1M'], ['3M', '3M'], ['1Y', '1Y'], ['All', 'All']], ui.weightRange, 'Weight chart range')}
+  ${segmented('weight-range', [['1M', '1 month'], ['3M', '3 months'], ['1Y', '1 year'], ['All', 'All']], ui.weightRange, 'Weight chart range')}
   ${weightChart()}
   ${sectionHead('This week')}
   ${weekInsights(today)}
   <div class="group">
     ${stat('Sessions done', `${wk.done} of ${wk.planned}`, bar(wk.done, wk.planned, 'effort'))}
     ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`, bar(wk.exMin, pos.before ? 0 : pos.block.targets.exMin, 'effort'))}
+    ${stat('Lifted in total', `${fmt(L.totals(state, today).liftedKg)} kg`)}
     ${stat('Training load', `${fmt(wk.load)} (RPE × min)`)}
     ${stat('Average steps', wk.stepsAvg != null ? fmt(wk.stepsAvg) : 'no data')}
     ${stat('Food logged', `${wk.daysLogged} of 7 days`, bar(wk.daysLogged, 7, 'gray'))}
@@ -1520,13 +1528,13 @@ function viewHealth() {
   const levelText = { normal: 'Normal.', elevated: 'Slightly above 120. Keep an eye on it.', raised: 'At or above 130/80 on average. Show this to your GP.', high: 'At or above 140/90 on average. See your GP soon.' };
   const firstW = waist[0], lastW = waist.at(-1);
   return `${sectionHead('For your doctor')}
-  ${segmented('report-days', [['28', '4 weeks'], ['91', '3 months'], ['182', '6 months'], ['start', 'All']], ui.reportDays, 'Period of the summary')}
+  ${segmented('report-days', [['28', '1 month'], ['91', '3 months'], ['182', '6 months'], ['start', 'All']], ui.reportDays, 'Period of the summary')}
   <div class="group"><button class="cell cell-action" data-act="doctor-pdf">${icon('export')}<span>Share as PDF</span></button></div>
   ${foot('The summary fits on one page: weight, blood pressure, blood tests, waist, training and food. Blood tests and the waist show the latest results, whatever the period. The file stays on this phone until you share it.')}
   ${sectionHead('Blood tests')}
   <div class="group">
     <div class="cell"><span class="tile info">${icon('test-tube')}</span><div class="cell-main"><div class="cell-title">Next blood test</div><div class="cell-sub">${esc(dateText(lab))}${toLab >= 0 ? `, in ${plural(toLab, 'day', 'days')}` : ''}. Ask for fasting glucose, HbA1c, lipids and uric acid.</div></div></div>
-    <label class="cell field"><span class="field-label">Change the date</span><input type="date" data-act="next-lab" value="${lab}"></label>
+    ${dateRow('Change the date', 'data-act="next-lab"', lab)}
   </div>
   <div class="group">${LABS.map(labRow).join('')}</div>
   ${labs.length ? '' : foot('No results yet. Add your last checkup, or import the checkup file from the Mac in More.')}
@@ -1566,6 +1574,12 @@ function sheetLab() {
 }
 
 // ---------- More, setup ----------
+// The native date field shows dd/mm/yyyy; it sits invisibly over a row that shows the date as the rest of the app writes it.
+function dateRow(label, attrs, value) {
+  const text = /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? dateText(value, { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }) : 'Pick a date';
+  return `<label class="cell field date-row"><span class="field-label">${label}</span><span class="date-text">${esc(text)}</span><input type="date" ${attrs} value="${esc(value || '')}"></label>`;
+}
+
 function profileForm(p) {
   const d = p || { sex: 'm', startDate: L.nextMonday(todayISO()), waterBase: 2500 };
   const v = (k) => (d[k] == null ? '' : esc(d[k]));
@@ -1578,7 +1592,7 @@ function profileForm(p) {
       ${row('Height', 'heightCm', 'cm', 'inputmode="decimal" required placeholder="Required"')}
       ${row(p ? 'Start weight' : 'Weight now', 'startWeight', 'kg', 'inputmode="decimal" required placeholder="Required"')}
       ${row('Resting heart rate', 'rhr', 'bpm', 'inputmode="numeric" placeholder="From Health"')}
-      <label class="cell field"><span class="field-label">Plan starts</span><input name="startDate" type="date" required value="${v('startDate')}"></label>
+      ${dateRow('Plan starts', 'name="startDate" required', d.startDate)}
     </div>
     ${foot(`${p ? 'Progress counts your milestones from the start weight, so log new weigh-ins on Today. ' : ''}The plan always starts on a Monday. Resting heart rate is in the Health app under Heart.`)}
     <details class="plain"><summary>${icon('caret-right')}Set your own targets</summary>
@@ -1592,7 +1606,7 @@ function profileForm(p) {
         ${row('VO2max target', 'vo2Target', 'mL/kg/min', 'inputmode="decimal" placeholder="Optional"')}
       </div>
     </details>
-    <button class="btn-start" type="submit">${p ? 'Save' : 'Start the plan'}</button>
+    ${p ? foot('Changes save as you go.') : '<button class="btn-start" type="submit">Start the plan</button>'}
   </form>`;
 }
 
@@ -1623,7 +1637,7 @@ function viewMore() {
   const action = (act, ic, kind, title, extra = '') => `<button class="cell cell-button" data-act="${act}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div>${extra}<span class="accessory">${icon('caret-right')}</span></button>`;
   const fileRow = (act, ic, kind, title) => `<label class="cell cell-button"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="accessory">${icon('caret-right')}</span><input type="file" accept=".json,application/json" data-act="${act}" hidden></label>`;
   return `${nav('More', 'Targets, reminders and your data')}
-  ${sectionHead('How you train')}
+  ${sectionHead('Training')}
   <div class="group"><div class="cell how-train"><span class="tile fuel">${icon('repeat')}</span><span class="cell-title">How you train</span>${segmented('train-mode', [['fixed', 'Fixed week'], ['rotation', 'Rotation']], (st.train === 'rotation') ? 'rotation' : 'fixed', 'How you train')}</div></div>
   ${foot(st.train === 'rotation' ? 'Today shows the next session of the week you have not done, whatever weekday it was planned for. Nothing counts as missed.' : 'The same sessions on the same weekdays, every week.')}
   ${sectionHead('You and your targets')}
@@ -1756,6 +1770,8 @@ function showSheet(html) {
   if (!s.open) {
     sheetReturn = keyOf(document.activeElement);
     s.showModal();
+    const t = $('#sheet-title'); // the first button would take focus, and its ring would sit on Close
+    if (t) { t.tabIndex = -1; t.focus({ preventScroll: true }); }
   }
 }
 // The sheet slides back down the way it came, then empties and hands focus back to what opened it.
@@ -1984,12 +2000,30 @@ function showTip(el, e) {
 function hideTip() {
   $('#tip').hidden = true;
 }
-// Drag a finger sideways over the activity grid to read each day, as the year view's squares are too small to tap one by one.
+// A tap or a sideways drag over the activity grid reads the nearest square; in the year view the squares are too small, so a tap reads that square's whole month.
+function heatTip(e) {
+  const g = e.target.closest?.('.heat');
+  if (!g) return false;
+  const cells = [...g.children].filter((x) => x.dataset.tip || x.dataset.m);
+  let best = null, gap = Infinity;
+  for (const x of cells) {
+    const r = x.getBoundingClientRect();
+    const d = Math.hypot(e.clientX - (r.left + r.right) / 2, e.clientY - (r.top + r.bottom) / 2);
+    if (d < gap) { gap = d; best = x; }
+  }
+  if (!best) return false;
+  if (best.dataset.tip) { showTip(best, e); return true; }
+  const days = cells.filter((x) => x.dataset.m === best.dataset.m);
+  const total = days.reduce((t, x) => t + Number(x.dataset.n), 0);
+  const active = days.filter((x) => Number(x.dataset.n) > 0).length;
+  const box = document.createElement('span');
+  box.dataset.tip = `${dateText(`${best.dataset.m}-01`, { month: 'long', year: 'numeric' })}: ${active ? `${plural(active, 'active day', 'active days')}, ${fmt(total)} ${best.dataset.unit}` : 'no activity'}`;
+  showTip(box, e);
+  return true;
+}
 document.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse' && !e.buttons) return;
-  const g = e.target.closest?.('.heat');
-  const c = g && document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.heat-cell[data-tip]');
-  if (c) showTip(c, e);
+  heatTip(e);
 });
 let toastTimer = null;
 function toast(msg, undo = false, typing = false) {
@@ -2113,6 +2147,7 @@ const ACT = {
     ui.tab = ui.screen = el.dataset.tab;
     if (ui.tab === 'today') ui.date = todayISO();
     if (ui.tab === 'train') ui.week = null;
+    if (ui.tab === 'food') ui.foodScroll = ui.food === 'menu' && ui.foodWeek === 'this';
     render(true);
   },
   day: (el) => {
@@ -2527,8 +2562,8 @@ const ACT = {
     ui.progress = 'health';
     render(true);
   },
-  'food-sec': (el) => { ui.food = el.dataset.id; render(); },
-  'food-week': (el) => { ui.foodWeek = el.dataset.id; render(); },
+  'food-sec': (el) => { ui.food = el.dataset.id; ui.foodScroll = el.dataset.id === 'menu'; render(); },
+  'food-week': (el) => { ui.foodWeek = el.dataset.id; ui.foodScroll = false; render(); },
   'progress-view': (el) => { ui.progress = el.dataset.id; render(); },
   'weight-range': (el) => { ui.weightRange = el.dataset.id; render(); },
   'weight-table': () => { ui.weightTable = !ui.weightTable; render(); },
@@ -2713,7 +2748,7 @@ const CHANGE = {
 };
 
 const SUBMIT = {
-  profile: (f) => {
+  profile: (f, auto = false) => {
     const g = (k) => f.elements[k]?.value;
     const p = {
       ...(state.profile || {}),
@@ -2747,7 +2782,7 @@ const SUBMIT = {
     L.applyHolds(state, todayISO());
     save();
     if (first) ui.screen = ui.tab = 'today';
-    render(true);
+    if (!auto) render(true); // a field saved on blur keeps the screen where it is
     toast(first ? 'Plan set up' : 'Saved');
   },
   quick: (f) => {
@@ -3006,7 +3041,7 @@ document.addEventListener('click', (e) => {
   if (!resending) tapAt = e.isTrusted && e.detail ? { t: e.timeStamp, x: e.clientX, y: e.clientY } : null; // a key press or a script's click() has no place
   const tipEl = e.target.closest?.('[data-tip]');
   if (tipEl) showTip(tipEl, e);
-  else hideTip();
+  else if (!heatTip(e)) hideTip();
   const sheet = $('#sheet');
   if (e.target === sheet) {
     // A drag of the sheet also ends with a click here, wherever it was let go; only a tap that began on the dimmed page closes.
@@ -3024,6 +3059,9 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.matches?.('.date-row input') && el.value) el.parentElement.querySelector('.date-text').textContent = dateText(el.value, { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+  const pf = el.closest?.('form[data-form=profile]');
+  if (pf && state.profile) SUBMIT.profile(pf, true);
   if (el.matches?.('[data-act]')) CHANGE[el.dataset.act]?.(el);
 });
 document.addEventListener('submit', (e) => {

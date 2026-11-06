@@ -119,14 +119,14 @@
 
     click('[data-tab=food]');
     for (const k of ['menu', 'prep', 'shopping', 'recipes', 'out', 'rules']) {
-      click(`#main [data-act=food-sec][data-id=${k}]`); check(`food: ${k}`);
+      click('#main [data-act=food-sec][data-id=menu]'); click(`#main [data-act=food-sec][data-id=${k}]`); check(`food: ${k}`);
       if (k === 'shopping') await sheet('#main [data-act=shop-share]', 'shopping list as text');
       if ($('#main [data-act=food-week][data-id=next]')) {
         click('#main [data-act=food-week][data-id=next]'); check(`food: ${k}, next week`);
         click('#main [data-act=food-week][data-id=this]');
       }
     }
-    click('#main [data-act=food-sec][data-id=recipes]');
+    click('#main [data-act=food-sec][data-id=menu]'); click('#main [data-act=food-sec][data-id=recipes]');
     document.querySelectorAll('#main details').forEach((d) => { d.open = true; });
     check('food: recipes, all open');
     click('#main [data-act=food-sec][data-id=menu]');

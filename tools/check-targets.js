@@ -128,7 +128,7 @@
 
     click('[data-tab=food]');
     for (const k of ['menu', 'prep', 'shopping', 'recipes', 'out', 'rules']) {
-      click(`#main [data-act=food-sec][data-id=${k}]`); sample(`food: ${k}`);
+      click('#main [data-act=food-sec][data-id=menu]'); click(`#main [data-act=food-sec][data-id=${k}]`); sample(`food: ${k}`);
       if (k === 'shopping') await sheet('#main [data-act=shop-share]', 'shopping list as text');
     }
     click('#main [data-act=food-sec][data-id=menu]');

@@ -560,8 +560,18 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 10;
+export const APP_VERSION = 11;
 export const CHANGES = [
+  {
+    version: 11,
+    notes: [
+      'Food has three tabs: Menu, Prep and Shopping. Recipes, Eating out and Rules sit at the foot of Menu, and Menu opens at today.',
+      'The weight card on Progress names your next milestone. Lifted in total moved to Charts.',
+      'More saves as you go, and dates read the way the rest of the app writes them.',
+      'Tap the activity grid anywhere to read the nearest day, or a whole month in the year view.',
+      'Tighter type and spacing, one shape for full-width buttons, one height for small buttons, and a clearer Progress icon.',
+    ],
+  },
   {
     version: 10,
     notes: [
