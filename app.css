@@ -651,8 +651,8 @@ ol.steps li::before {
 /* ---- Tab bar, sheets, tooltip, toast, update bar ---- */
 .tabs {
   position: fixed; z-index: 30; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom));
-  transform: translateX(-50%); width: min(calc(100% - 2 * max(12px, env(safe-area-inset-left), env(safe-area-inset-right))), 520px);
-  display: grid; grid-template-columns: repeat(5, 1fr); padding: 5px; border-radius: 999px;
+  transform: translateX(-50%); width: min(calc(100% - 2 * max(12px, env(safe-area-inset-left), env(safe-area-inset-right))), 440px);
+  display: grid; grid-template-columns: repeat(4, 1fr); padding: 5px; border-radius: 999px;
   background: var(--glass); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
 }
