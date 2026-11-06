@@ -86,9 +86,9 @@
     await sheet('#main [data-act=ex-new]', 'new exercise');
     await sheet('#main [data-act=ex-detail]', 'exercise detail');
     click('#main [data-act=train-view][data-id=schedule]');
-    click('[data-tab=more]'); click('#main [data-act=train-mode][data-id=rotation]'); click('[data-tab=train]'); check('train: rotation');
+    click('[data-act=settings-open]'); click('#main [data-act=settings-page][data-id=train]'); click('#main [data-act=train-mode][data-id=rotation]'); click('#main [data-act=settings-page][data-id=""]'); click('#main [data-act=settings-close]'); click('[data-tab=train]'); check('train: rotation');
     click('[data-tab=today]'); check('today: rotation');
-    click('[data-tab=more]'); click('#main [data-act=train-mode][data-id=fixed]'); click('[data-tab=train]');
+    click('[data-act=settings-open]'); click('#main [data-act=settings-page][data-id=train]'); click('#main [data-act=train-mode][data-id=fixed]'); click('#main [data-act=settings-page][data-id=""]'); click('#main [data-act=settings-close]'); click('[data-tab=train]');
     click('#main [data-act=week][data-n="7"]'); check('train, next week');
     // A logged session cannot move, so the move sheet is opened on one from next week.
     if (click('#main [data-act=open-session][data-id^=str], #main [data-act=open-session][data-id^=gym]')) {
@@ -147,10 +147,14 @@
     await sheet('#main [data-act=lab-open]', 'blood test');
     click('#main [data-act=progress-view][data-id=charts]');
 
-    click('[data-tab=more]'); check('more');
-    await sheet('#main [data-act=export-open]', 'export a backup');
-    await sheet('#main [data-act=shortcut-help]', 'iPhone shortcuts from More');
-    await sheet('#main [data-act=whats-new]', "what's new");
+    click('[data-act=settings-open]'); check('settings');
+    for (const pg of ['profile', 'train', 'alerts', 'reminders', 'look', 'data', 'about']) {
+      click(`#main [data-act=settings-page][data-id=${pg}]`); check(`settings: ${pg}`);
+      if (pg === 'data') { await sheet('#main [data-act=export-open]', 'export a backup'); await sheet('#main [data-act=shortcut-help]', 'iPhone shortcuts'); }
+      if (pg === 'about') await sheet('#main [data-act=whats-new]', "what's new");
+      click('#main [data-act=settings-page][data-id=""]');
+    }
+    click('#main [data-act=settings-close]');
     click('[data-tab=today]');
     window.scrollTo(0, 0);
   } catch (err) {

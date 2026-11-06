@@ -28,14 +28,14 @@ const flagText = (tags) => `${tags?.includes('sugary') ? ', sugary drink' : ''}$
 const foodSub = (f, per = '', fib = true) => `${fmt(f.kcal)} kcal, ${fmt(f.p)} g protein${fib ? `, ${fmt(f.fib || 0)} g fibre` : ''}${per}${flagText(f.tags)}`;
 const DEFAULT_RPE = { easy: 4, moderate: 5, hard: 7, strength: 7 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'trend-up'], ['more', 'More', 'dots-three-circle']];
+const TABS = [['today', 'Today', 'calendar-check'], ['train', 'Train', 'barbell'], ['food', 'Food', 'fork-knife'], ['progress', 'Progress', 'trend-up']];
 const SESSION_ICON = { walks: 'person-simple-walk', longwalk: 'footprints', cardio: 'heartbeat', intervals: 'timer', rest: 'bed' };
 const sessionIcon = (s) => SESSION_ICON[s.id] || (s.kind === 'strength' ? 'barbell' : 'heartbeat');
 const CLOSE_BTN = `<button class="icon-btn" data-act="sheet-close" aria-label="Close">${icon('x')}</button>`;
 
 let state = load();
 const ui = {
-  screen: 'today', tab: 'today', date: todayISO(), week: null, food: 'menu', foodWeek: 'this', trainView: 'schedule', exQuery: '', exPart: 'All', progress: 'overview', weightRange: '3M', weightTable: false, heatMetric: 'time', heatRange: '12w', range: 14, reportDays: '91',
+  screen: 'today', tab: 'today', settingsPage: null, date: todayISO(), week: null, food: 'menu', foodWeek: 'this', trainView: 'schedule', exQuery: '', exPart: 'All', progress: 'overview', weightRange: '3M', weightTable: false, heatMetric: 'time', heatRange: '12w', range: 14, reportDays: '91',
   session: null, addSlot: 'lunch', portion: 1, rest: null, hold: null, phase: -1, persisted: false, onToday: true, updating: false, pendingFile: null,
 };
 let ticker = null;
@@ -106,11 +106,36 @@ function snapshot() {
   undoTimers = { rest: ui.rest, hold: ui.hold }; // Undo also puts back a rest or hold that the action started or stopped
 }
 
+// ---------- Theme ----------
+// Light and dark live in prefers-color-scheme rules. Forcing a theme rewrites those rules' conditions, so the CSS is written once.
+const DARK_Q = '(prefers-color-scheme: dark)';
+let mediaRules = null;
+let themeNow = null;
+function applyTheme() {
+  const want = state?.settings?.theme || 'auto';
+  if (want === themeNow) return;
+  themeNow = want;
+  if (!mediaRules) {
+    mediaRules = [];
+    for (const sheet of document.styleSheets) {
+      try { for (const r of sheet.cssRules) if (r.media && r.media.mediaText.includes('prefers-color-scheme: dark')) mediaRules.push([r, r.media.mediaText]); } catch { /* a sheet from another origin */ }
+    }
+  }
+  const t = state?.settings?.theme || 'auto';
+  for (const [r, orig] of mediaRules) r.media.mediaText = t === 'auto' ? orig : orig.replace(DARK_Q, t === 'dark' ? '(min-width: 0px)' : '(max-width: 0px)');
+  document.documentElement.style.colorScheme = t === 'auto' ? '' : t;
+  const metas = document.querySelectorAll('meta[name=theme-color]');
+  metas[0]?.setAttribute('media', t === 'auto' ? '(prefers-color-scheme: light)' : t === 'light' ? 'all' : 'not all');
+  metas[1]?.setAttribute('media', t === 'auto' ? '(prefers-color-scheme: dark)' : t === 'dark' ? 'all' : 'not all');
+}
+
 // ---------- Rendering ----------
-const VIEWS = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, more: viewMore, session: viewSession, setup: viewSetup };
+const VIEWS = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, settings: viewSettings, session: viewSession, setup: viewSetup };
 
 function render(top = false) {
   stopTicker();
+  applyTheme();
+  if (ui.screen === 'settings' && !SETTINGS_PAGES.includes(ui.settingsPage) && ui.settingsPage) ui.settingsPage = null;
   if (top) guardTap = tapAt; // a new screen comes up under the finger, and the second tap of a double tap would land on it
   if (!state.profile) ui.screen = 'setup';
   if (swipe && ui.screen !== 'session') { clearTimeout(swipe.timer); swipe.under?.remove(); swipe = null; } // a tab tapped mid-swipe
@@ -179,6 +204,7 @@ function observeTitle() {
 }
 
 function nav(title, cap = '', actions = '') {
+  if (['today', 'train', 'food', 'progress'].includes(ui.screen)) actions += `<button class="icon-btn" data-act="settings-open" aria-label="Settings">${icon('gear-six')}</button>`;
   return `<header class="nav"><div class="nav-row"><div class="nav-text">${cap ? `<p class="nav-cap">${cap}</p>` : ''}<h1 class="nav-title">${title}</h1></div>${actions ? `<div class="nav-actions">${actions}</div>` : ''}</div></header>`;
 }
 const sectionHead = (title, meta = '') => `<div class="section-head"><h2>${title}</h2>${meta ? `<span class="section-meta">${meta}</span>` : ''}</div>`;
@@ -345,7 +371,7 @@ function beforeStart() {
     ['scales', 'Update your weight in the Health app, so the Watch calorie and cardio fitness numbers are right.'],
     ['flame', 'Set a Move goal you can close on most days, and raise it when it gets easy.'],
     ['shopping-cart', 'Shop from Food, Shopping (next week), then do the Sunday prep.'],
-    ['calendar-plus', 'Add the reminders to your calendar from More.'],
+    ['calendar-plus', 'Add the reminders to your calendar from Settings.'],
     ['scales', 'Weigh yourself on Monday morning before breakfast and log it below.'],
   ].map(([ic, text]) => `<div class="cell"><span class="tile gray">${icon(ic)}</span><div class="cell-main"><div class="cell-text">${esc(text)}</div></div></div>`).join('')}</div>`;
 }
@@ -954,7 +980,7 @@ function foodMenu() {
 function foodRecipes() {
   return SLOTS.map((slot) => `${sectionHead(SLOT_LABEL[slot])}<div class="group">${MEALS.filter((m) => m.slot === slot).map((m) => `<details class="cell-details"><summary class="cell"><div class="cell-main"><span class="cell-title">${esc(m.name)}</span><span class="cell-sub">${m.kcal} kcal, ${m.p} g protein</span></div><span class="accessory">${icon('caret-right')}</span></summary><div class="details-body">${recipeBody(m)}</div></details>`).join('')}</div>`).join('')
     + `${sectionHead('Extras to log honestly')}<div class="group">${MEALS.filter((m) => m.slot === 'extra').map((m) => `<div class="cell"><div class="cell-main"><span class="cell-title">${esc(m.name)}</span><span class="cell-sub">${esc(foodSub(m))}</span></div></div>`).join('')}</div>
-    ${foot('Typical values for one portion, so they go in the log in one tap from Add food. The sources of the Thai dish values are credited at the bottom of More.')}`;
+    ${foot('Typical values for one portion, so they go in the log in one tap from Add food. The sources of the Thai dish values are credited at the bottom of Settings, About.')}`;
 }
 
 function foodPrep() {
@@ -1275,7 +1301,7 @@ function weightChart() {
 function vo2Chart() {
   const p = state.profile;
   const pts = L.vo2Readings(state).filter(([d]) => d >= L.addDays(p.startDate, -28));
-  if (pts.length < 2) return foot('VO2max shows here once the Steady Watch shortcut brings in 2 readings. If yours has no Cardio Fitness step, make it again from More, iPhone shortcuts.');
+  if (pts.length < 2) return foot('VO2max shows here once the Steady Watch shortcut brings in 2 readings. If yours has no Cardio Fitness step, make it again from Settings, Data and backup, iPhone shortcuts.');
   const [d0, v0] = pts[0], [d1, v1] = pts.at(-1);
   const startD = [p.startDate, d0].sort()[0];
   const endD = [todayISO(), d1].sort().at(-1);
@@ -1537,7 +1563,7 @@ function viewHealth() {
     ${dateRow('Change the date', 'data-act="next-lab"', lab)}
   </div>
   <div class="group">${LABS.map(labRow).join('')}</div>
-  ${labs.length ? '' : foot('No results yet. Add your last checkup, or import the checkup file from the Mac in More.')}
+  ${labs.length ? '' : foot('No results yet. Add your last checkup, or import the checkup file from the Mac in Settings, Data and backup.')}
   ${labs.length ? '<p class="group-label">Results by date</p>' : ''}
   <div class="group">${labs.map((l) => `<div class="cell"><div class="cell-main"><div class="cell-title">${esc(dated(l.date))}</div><div class="cell-sub">${plural(LABS.filter((x) => l[x.key] != null).length, 'result', 'results')}</div></div>
     <button class="icon-btn" data-act="health-del" data-k="labs" data-date="${l.date}" aria-label="Remove the results from ${esc(dated(l.date))}">${icon('x')}</button></div>`).join('')}
@@ -1630,41 +1656,67 @@ function viewSetup() {
   <p class="center-foot">Moving phones? <label class="link">Import a backup<input type="file" accept=".json,application/json" data-act="import-backup" hidden></label></p>`;
 }
 
-function viewMore() {
+const SETTINGS_PAGES = ['profile', 'train', 'alerts', 'reminders', 'look', 'data', 'about'];
+const THEMES = [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']];
+function settingsRow(page, ic, kind, title, value) {
+  return `<button class="cell cell-button" data-act="settings-page" data-id="${page}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="cell-value">${esc(value)}</span><span class="accessory">${icon('caret-right')}</span></button>`;
+}
+
+function viewSettings() {
   const p = state.profile;
   const st = state.settings;
   const rem = st.reminders || {};
   const action = (act, ic, kind, title, extra = '') => `<button class="cell cell-button" data-act="${act}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div>${extra}<span class="accessory">${icon('caret-right')}</span></button>`;
   const fileRow = (act, ic, kind, title) => `<label class="cell cell-button"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="accessory">${icon('caret-right')}</span><input type="file" accept=".json,application/json" data-act="${act}" hidden></label>`;
-  return `${nav('More', 'Targets, reminders and your data')}
-  ${sectionHead('Training')}
-  <div class="group"><div class="cell how-train"><span class="tile fuel">${icon('repeat')}</span><span class="cell-title">How you train</span>${segmented('train-mode', [['fixed', 'Fixed week'], ['rotation', 'Rotation']], (st.train === 'rotation') ? 'rotation' : 'fixed', 'How you train')}</div></div>
-  ${foot(st.train === 'rotation' ? 'Today shows the next session of the week you have not done, whatever weekday it was planned for. Nothing counts as missed.' : 'The same sessions on the same weekdays, every week.')}
-  ${sectionHead('You and your targets')}
-  ${profileForm(p)}
-  ${sectionHead('Gym alerts')}
+  const page = ui.settingsPage;
+  const back = (label) => `<div class="back-row"><button class="back" data-act="${page ? 'settings-page' : 'settings-close'}" data-id="">${icon('caret-left')}<span>${label}</span></button></div>`;
+  if (!page) {
+    const on = (st.reminders && Object.values(st.reminders).filter((r) => r.on !== false).length) || REMINDERS.length;
+    return `${back(ui.tab === 'today' ? 'Today' : TABS.find((t) => t[0] === ui.tab)?.[1] ?? 'Back')}
+    ${nav('Settings')}
+    <div class="group"><button class="cell cell-button settings-me" data-act="settings-page" data-id="profile"><span class="tile gray">${icon('user-circle')}</span><div class="cell-main"><div class="cell-title">You and your targets</div><div class="cell-sub">${p ? `${p.age} years, ${p.heightCm} cm, from ${p.startWeight} kg` : ''}</div></div><span class="accessory">${icon('caret-right')}</span></button></div>
+    <div class="group">
+      ${settingsRow('train', 'barbell', 'effort', 'Training', st.train === 'rotation' ? 'Rotation' : 'Fixed week')}
+      ${settingsRow('alerts', 'speaker-high', 'fuel', 'Timer alerts', `${st.loudBeep ? 'Beep on silent' : 'Quiet'}, flash`)}
+    </div>
+    <div class="group">
+      ${settingsRow('reminders', 'bell', 'water', 'Reminders', plural(on, 'reminder', 'reminders'))}
+      ${settingsRow('look', 'palette', 'info', 'Look', THEMES.find((t) => t[0] === (st.theme || 'auto'))[1])}
+    </div>
+    <div class="group">
+      ${settingsRow('data', 'cloud-arrow-up', 'water', 'Data and backup', state.lastBackup ? `Backed up ${short(state.lastBackup)}` : 'Never backed up')}
+      ${settingsRow('about', 'info', 'gray', 'About', `Version ${APP_VERSION}`)}
+    </div>`;
+  }
+  const titles = { profile: 'You and your targets', train: 'Training', alerts: 'Timer alerts', reminders: 'Reminders', look: 'Look', data: 'Data and backup', about: 'About' };
+  const content = {
+    profile: () => `${profileForm(p)}`,
+    train: () => `<div class="group"><div class="cell how-train"><span class="tile fuel">${icon('repeat')}</span><span class="cell-title">How you train</span>${segmented('train-mode', [['fixed', 'Fixed week'], ['rotation', 'Rotation']], (st.train === 'rotation') ? 'rotation' : 'fixed', 'How you train')}</div></div>
+  ${foot(st.train === 'rotation' ? 'Today shows the next session of the week you have not done, whatever weekday it was planned for. Nothing counts as missed.' : 'The same sessions on the same weekdays, every week.')}`,
+    alerts: () => `${sectionHead('Gym alerts')}
   <div class="group"><label class="cell switch-cell"><span class="tile fuel">${icon('speaker-high')}</span><span class="cell-main"><span class="cell-title">Beep on silent</span><span class="cell-sub">This can pause your music</span></span><input type="checkbox" class="switch" switch data-act="setting" data-k="loudBeep" ${st.loudBeep ? 'checked' : ''}></label></div>
   ${foot(`The screen also flashes when rest ends and at each interval change, and it stays on during a session. ${esc(WATCH_ALERT)}`)}
   ${sectionHead('Hot months')}
   <div class="card months">${MONTHS.map((m, i) => `<label class="month"><input type="checkbox" data-act="hot-month" data-n="${i + 1}" ${(st.hotMonths || []).includes(i + 1) ? 'checked' : ''}><span>${m}</span></label>`).join('')}</div>
-  ${foot('In these months, Today and the session screens remind you to train indoors or in the cool of the day.')}
-  ${sectionHead('Reminders')}
-  <div class="group">${REMINDERS.map((r) => `<div class="cell switch-cell"><span class="cell-main"><span class="cell-title">${esc(r.label.split(',')[0])}</span><span class="cell-sub">${esc(r.label.split(', ').slice(1).join(', '))}</span></span>
+  ${foot('In these months, Today and the session screens remind you to train indoors or in the cool of the day.')}`,
+    reminders: () => `<div class="group">${REMINDERS.map((r) => `<div class="cell switch-cell"><span class="cell-main"><span class="cell-title">${esc(r.label.split(',')[0])}</span><span class="cell-sub">${esc(r.label.split(', ').slice(1).join(', '))}</span></span>
     <input type="time" class="time" data-act="rem-time" data-id="${r.id}" value="${esc(rem[r.id]?.time || r.time)}" aria-label="Time for ${esc(r.label)}">
     <input type="checkbox" class="switch" switch data-act="rem-on" data-id="${r.id}" ${rem[r.id]?.on === false ? '' : 'checked'} aria-label="${esc(r.label)}"></div>`).join('')}
     ${action('ics', 'calendar-plus', 'effort', 'Add to Calendar')}
     ${action('ics-save', 'export', 'gray', 'Save the calendar file')}
   </div>
-  ${foot('Web apps on iPhone cannot send their own reminders, so these go into Calendar as repeating events with an alert. Tap Add All when they appear. If nothing opens, save the file and open it from Files. To change them later, delete the Steady events in Calendar and add them again.')}
-  ${sectionHead('Your data')}
-  <div class="group">
+  ${foot('Web apps on iPhone cannot send their own reminders, so these go into Calendar as repeating events with an alert. Tap Add All when they appear. If nothing opens, save the file and open it from Files. To change them later, delete the Steady events in Calendar and add them again.')}`,
+    look: () => `${sectionHead('Theme')}
+  ${segmented('theme', THEMES, st.theme || 'auto', 'Theme')}
+  ${foot('Automatic follows the phone. Light and dark stay as you set them, whatever the phone does.')}`,
+    data: () => `<div class="group">
     ${action('export-open', 'cloud-arrow-up', 'water', 'Export backup', `<span class="cell-value">${state.lastBackup ? esc(short(state.lastBackup)) : 'Never'}</span>`)}
     ${fileRow('import-backup', 'arrow-clockwise', 'gray', 'Import backup')}
     ${fileRow('import-data', 'watch', 'effort', 'Import Watch or checkup file')}
     ${action('shortcut-help', 'clipboard-text', 'fuel', 'iPhone shortcuts')}
   </div>
-  ${foot(`Everything stays in this app's storage on this phone${ui.persisted ? ', and the phone has agreed to keep it' : ''}. Watch numbers come in with the Steady Watch shortcut: run it, then tap Paste from Watch on Today. A Watch or checkup file from the Mac still imports here, and keeps the numbers you typed in.`)}
-  ${sectionHead('How the numbers work')}
+  ${foot(`Everything stays in this app's storage on this phone${ui.persisted ? ', and the phone has agreed to keep it' : ''}. Watch numbers come in with the Steady Watch shortcut: run it, then tap Paste from Watch on Today. A Watch or checkup file from the Mac still imports here, and keeps the numbers you typed in.`)}`,
+    about: () => `${sectionHead('How the numbers work')}
   <div class="card prose"><ul class="prose-list">
     <li>Calorie limit: resting energy (Mifflin-St Jeor) times 1.375, minus 550. It drops as your weight drops. After 4 weeks, Progress can replace it with your real burn.</li>
     <li>Protein: 1.3 g per kg of adjusted body weight. Fibre: 30 g.</li>
@@ -1680,7 +1732,11 @@ function viewMore() {
   <div class="card prose"><ul class="prose-list">${SAFETY.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>
   <div class="group">${action('whats-new', 'sparkle', 'water', "What's new")}</div>
   <div class="group danger-group"><button class="cell cell-action danger" data-act="reset">${icon('trash')}<span>Delete all data</span></button></div>
-  ${foot('Icons by Phosphor Icons, MIT licence. Exercise drawings from Workout Guide by Bryl Lim, some traced from Everkinetic, under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0), shown in black in light mode and dimmed to 85% brightness in dark mode. Full credits for them are in img/ex/LICENSE.txt. Thai dish values from the Thai Food Composition Database (INMU, Mahidol University, 2025), the Thai Department of Health food tables (2008 and 2018) and a Bangkok delivery food study (IJERPH, 2023).')}`;
+  ${foot('Icons by Phosphor Icons, MIT licence. Exercise drawings from Workout Guide by Bryl Lim, some traced from Everkinetic, under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0), shown in black in light mode and dimmed to 85% brightness in dark mode. Full credits for them are in img/ex/LICENSE.txt. Thai dish values from the Thai Food Composition Database (INMU, Mahidol University, 2025), the Thai Department of Health food tables (2008 and 2018) and a Bangkok delivery food study (IJERPH, 2023).')}`,
+  }[page]();
+  return `${back('Settings')}
+  ${nav(titles[page])}
+  ${content}`;
 }
 
 function sheetShortcuts() {
@@ -2131,7 +2187,7 @@ function applyPaste(text) {
     const data = L.parseWatchPaste(text, ui.date);
     snapshot();
     const n = L.mergeWatch(state, data, 'shortcut', todayISO());
-    if (!n) return fail('Those numbers are out of range. Check the shortcut against the instructions in More, iPhone shortcuts.');
+    if (!n) return fail('Those numbers are out of range. Check the shortcut against the instructions in Settings, Data and backup, iPhone shortcuts.');
     save(); closeSheet(); render();
     toast(`Added Watch numbers for ${plural(n, 'day', 'days')}`, true);
   } catch (e) {
@@ -2606,6 +2662,10 @@ const ACT = {
     shareFile(`steady-summary-${today}.pdf`, 'application/pdf', summaryPdf(L.doctorSummary(state, from, today), today));
   },
   'watch-seen': () => { state.settings = { ...state.settings, watchSeen: true }; save(); render(); },
+  'settings-open': () => { ui.screen = 'settings'; ui.settingsPage = null; render(true); },
+  'settings-close': () => { ui.screen = ui.tab; ui.settingsPage = null; render(true); },
+  'settings-page': (el) => { ui.settingsPage = el.dataset.id || null; render(true); },
+  theme: (el) => { state.settings.theme = el.dataset.id; save(); applyTheme(); render(); },
   'weigh-open': () => showSheet(sheetWeigh()),
   'weigh-step': (el) => {
     const input = el.closest('form').elements.kg;

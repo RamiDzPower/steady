@@ -194,12 +194,12 @@ test('What is new shows every entry newer than the one seen, and the latest when
 });
 
 test('What is new and the shortcut steps follow the copy rules', () => {
-  assert.equal(APP_VERSION, 11);
-  assert.deepEqual(CHANGES.map((c) => c.version), [11, 10, 9, 8, 7, 6, 5]); // newest first
-  assert.equal(CHANGES[5].notes.length, 6);
-  assert.equal(CHANGES[6].notes.length, 7);
+  assert.equal(APP_VERSION, 12);
+  assert.deepEqual(CHANGES.map((c) => c.version), [12, 11, 10, 9, 8, 7, 6, 5]); // newest first
+  assert.equal(CHANGES[6].notes.length, 6);
+  assert.equal(CHANGES[7].notes.length, 7);
   // A shortcut made for release 4 still pastes without an error, so What's new has to say it needs making again.
-  assert.match(CHANGES[6].notes[0], /Steady Watch shortcut has new steps.*More, iPhone shortcuts/);
+  assert.match(CHANGES[7].notes[0], /Steady Watch shortcut has new steps.*More, iPhone shortcuts/);
   for (const s of [...CHANGES.flatMap((c) => c.notes), ...SHORTCUT_IN]) assert.doesNotMatch(s, /[\u2013\u2014!]/, s); // no en or em dashes, no exclamation marks
   assert.ok(SHORTCUT_IN.some((s) => /Local Only/.test(s)) && SHORTCUT_IN.some((s) => /yyyy-MM-dd/.test(s)));
   // Cardio Fitness can go weeks without a reading, so its search looks back 3 months for the latest one.

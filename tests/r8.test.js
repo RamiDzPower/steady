@@ -170,3 +170,8 @@ test('cleanBackup keeps valid extras, own exercises and the Rotation setting', (
   assert.equal(L.cleanBackup({ v: 1, days: {}, settings: { train: 'weird' } }).settings.train, 'fixed');
   assert.deepEqual([L.cleanBackup({ v: 1, days: {} }).extras, L.cleanBackup({ v: 1, days: {} }).customEx], [[], []], 'an older backup has none');
 });
+
+test('theme setting keeps light and dark and falls back to automatic', () => {
+  assert.equal(L.cleanBackup({ v: 1, days: {}, settings: { theme: 'dark' } }).settings.theme, 'dark');
+  assert.equal(L.cleanBackup({ v: 1, days: {}, settings: { theme: 'purple' } }).settings.theme, 'auto');
+});

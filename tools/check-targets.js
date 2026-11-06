@@ -142,11 +142,15 @@
     await sheet('#main [data-act=lab-open]', 'blood test');
     click('#main [data-act=progress-view][data-id=charts]');
 
-    click('[data-tab=more]');
+    click('[data-act=settings-open]'); sample('settings');
+    click('#main [data-act=settings-page][data-id=profile]');
     document.querySelectorAll('#main details').forEach((d) => { d.open = true; });
-    sample('more, targets open');
+    sample('settings: targets open');
+    click('#main [data-act=settings-page][data-id=""]'); click('#main [data-act=settings-page][data-id=data]');
     await sheet('#main [data-act=export-open]', 'export a backup');
+    click('#main [data-act=settings-page][data-id=""]'); click('#main [data-act=settings-page][data-id=about]');
     await sheet('#main [data-act=whats-new]', "what's new");
+    click('#main [data-act=settings-page][data-id=""]'); click('#main [data-act=settings-close]');
     click('[data-tab=today]');
     window.scrollTo(0, 0);
   } finally {

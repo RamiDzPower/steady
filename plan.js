@@ -560,8 +560,16 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 11;
+export const APP_VERSION = 12;
 export const CHANGES = [
+  {
+    version: 12,
+    notes: [
+      'There is a Settings page now. Tap the gear at the top right of Today, Train, Food or Progress.',
+      'Settings groups your targets, training, timer alerts, reminders, data and backup, and About, each on its own page.',
+      'Look lets you choose Automatic, Light or Dark. The More tab is gone, as everything in it lives in Settings.',
+    ],
+  },
   {
     version: 11,
     notes: [
