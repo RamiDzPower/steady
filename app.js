@@ -184,12 +184,12 @@ const sectionHead = (title, meta = '') => `<div class="section-head"><h2>${title
 const callout = (iconName, html, cls = '') => `<div class="callout ${cls}"><span class="tile ${cls || 'info'}">${icon(iconName)}</span><div class="callout-body">${html}</div></div>`;
 const foot = (html) => `<p class="section-foot">${html}</p>`;
 
-function ring(kind, name, value, target, valText, unit, ofText) {
+function ring(kind, name, value, target, valText, unit, ofText, limit = false) {
   const r = 40, c = 2 * Math.PI * r;
   const f = target > 0 ? value / target : value > 0 ? 1 : 0;
   const arc = (frac, cls) => (frac > 0.001 ? `<circle class="${cls}" cx="50" cy="50" r="${r}" stroke-dasharray="${(c * frac).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 50 50)"/>` : '');
   return `<figure class="ring ${kind}">
-    <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}</svg>
+    <div class="ring-art"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="${r}"/>${arc(Math.min(f, 1), 'ring-arc')}${arc(Math.min(Math.max(f - 1, 0), 1), 'ring-over')}${limit ? '<line class="ring-notch" x1="50" y1="3" x2="50" y2="17"/>' : ''}</svg>
       <span class="ring-val"><span class="num">${valText}</span><span class="unit">${unit}</span></span></div>
     <figcaption><span class="ring-name">${name}</span><span class="ring-of">${ofText}</span></figcaption>
   </figure>`;
@@ -252,7 +252,7 @@ function viewToday() {
   <p class="lede today-lede">${todayLede(d, sessions, day, food, t)}</p>
   <section class="card summary" aria-label="Food, water and exercise so far">
     <div class="rings">
-      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(food.kcal), 'kcal', food.kcal > t.kcal ? `${fmt(food.kcal - t.kcal)} over` : `${fmt(t.kcal - food.kcal)} left`)}
+      ${ring('fuel', 'Food', food.kcal, t.kcal, fmt(Math.abs(t.kcal - food.kcal)), food.kcal > t.kcal ? 'over' : 'left', `${fmt(food.kcal)} eaten`, true)}
       ${ring('water', 'Water', water, wTarget, litres(water), 'L', `of ${litres(wTarget)}`)}
       ${ring('effort', 'Exercise', exDone, exPlan, String(exDone), 'min', exPlan ? `of ${exPlan}` : 'rest day')}
     </div>
@@ -497,7 +497,7 @@ function exCards() {
       <span class="ex-card-name">${esc(e.name)}</span>
       <span class="ex-card-sub">${esc(e.muscles ?? e.part)}, ${esc(e.gear.toLowerCase())}</span>
     </button>
-    <button class="icon-btn" data-act="ex-add" data-id="${esc(e.id)}" aria-label="Add ${esc(e.name)} to the running workout">${icon('plus')}</button>
+    ${state.active && SESSIONS[state.active.id]?.exercises ? `<button class="icon-btn" data-act="ex-add" data-id="${esc(e.id)}" aria-label="Add ${esc(e.name)} to the running workout">${icon('plus')}</button>` : ''}
   </article>`).join('');
 }
 function viewExercises() {
@@ -541,7 +541,7 @@ function sheetExDetail(id) {
       <div class="cell"><div class="cell-main"><div class="cell-title">Heaviest</div></div><span class="cell-value">${best ? `${best} kg` : 'no weight logged'}</span></div>
     </div>
     <div class="group actions-group">
-      <button class="cell cell-action" data-act="ex-add" data-id="${esc(id)}"${running ? '' : ' disabled'}>${icon('plus-circle')}<span>Add to the running workout</span></button>
+      ${running ? `<button class="cell cell-action" data-act="ex-add" data-id="${esc(id)}">${icon('plus-circle')}<span>Add to the running workout</span></button>` : ''}
       ${e.custom ? `<button class="cell cell-action danger" data-act="ex-del" data-id="${esc(id)}">${icon('x')}<span>Delete this exercise</span></button>` : ''}
     </div>
     ${running ? '' : foot('Start a strength workout first. Then you can add this to it.')}</div>`;
@@ -553,6 +553,16 @@ function defaultSlot(id) {
     if (hit) return [id, hit[1], hit[2], hit[3]];
   }
   return [id, 3, exInfo(id)?.unit === 's' ? '30 seconds' : '10', 60];
+}
+
+// Today's main session with Start, above everything else on Train.
+function todayCard() {
+  const today = todayISO();
+  const s = sessionsOn(today).find((x) => x.kind !== 'rest' && x.id !== 'walks') ?? sessionsOn(today).find((x) => x.kind !== 'rest');
+  if (!s) return '';
+  const done = state.days[today]?.workouts?.some((w) => w.id === s.id);
+  return `<section class="card today-card"><p class="streak-cap">Today</p><p class="today-name">${esc(s.name)}</p><p class="hero-sub">${s.exercises ? `${plural(s.exercises.length, 'exercise', 'exercises')}, ` : ''}about ${s.minutes} minutes${done ? ', done' : ''}</p>
+    <button class="btn-start" data-act="open-session" data-id="${s.id}" data-date="${today}">${icon(done ? 'check' : 'play')}${done ? 'Open' : 'Start'}</button></section>`;
 }
 
 function viewTrain() {
@@ -570,12 +580,10 @@ function viewTrain() {
   const actions = `<button class="icon-btn" data-act="week" data-n="-7" aria-label="Previous week">${icon('caret-left')}</button><button class="icon-btn" data-act="week" data-n="7" aria-label="Next week">${icon('caret-right')}</button>`;
   const zone = (name, range, kind, e) => `<div class="cell"><span class="zone-dot ${kind}"></span><div class="cell-main"><div class="cell-title">${name}</div><div class="cell-sub">RPE ${e.rpe}. ${esc(e.talk)}.</div></div>${range ? `<span class="cell-value num">${range}</span>` : ''}</div>`;
   if (ui.trainView === 'exercises') return viewExercises();
-  const rotation = state.settings?.train === 'rotation';
   return `
   ${nav(pos.before ? 'Before the plan' : `Week ${pos.week}`, cap, actions)}
   ${segmented('train-view', [['schedule', 'Schedule'], ['exercises', 'Exercises']], ui.trainView, 'Train views')}
-  <div class="group"><div class="cell how-train"><span class="tile fuel">${icon('repeat')}</span><span class="cell-title">How you train</span>${segmented('train-mode', [['fixed', 'Fixed week'], ['rotation', 'Rotation']], rotation ? 'rotation' : 'fixed', 'How you train')}</div></div>
-  ${foot(rotation ? 'Today shows the next session of the week you have not done, whatever weekday it was planned for. Nothing counts as missed.' : 'The same sessions on the same weekdays, every week.')}
+  ${isCurrent && !pos.before ? todayCard() : ''}
   <p class="lede">${esc(block.intro)}</p>
   ${pos.deload ? callout('arrow-clockwise', `<p>${esc(DELOAD)}</p>`) : ''}
   ${pos.repeating ? callout('repeat', `<p><strong>This week repeats week ${pos.week}.</strong></p>${isCurrent ? '<button class="btn btn-gray btn-sm" data-act="skip-hold">Move on anyway</button>' : ''}`) : ''}
@@ -593,7 +601,7 @@ function viewTrain() {
   ${foot('Tap a session to open it. Tap a rest day, or a day with only walks, to plan something there.')}
   ${sectionHead('How hard')}
   <div class="group">
-    ${zone('Easy', `under ${z.easy[1]}`, 'easy', EFFORT.easy)}
+    ${zone('Easy', `under ${z.easy[1]} bpm`, 'easy', EFFORT.easy)}
     ${zone('Moderate', `${z.moderate[0]} to ${z.moderate[1]}`, 'moderate', EFFORT.moderate)}
     ${zone('Hard', `${z.hard[0]} to ${z.hard[1]}`, 'hard', EFFORT.hard)}
     ${zone('Strength', '', 'strength', EFFORT.strength)}
@@ -664,24 +672,25 @@ function viewSession() {
   const placed = !active && !logged.length && s.id !== 'walks' && s.kind !== 'rest' && plannedOn(date).some((x) => x.id === id);
   const movable = placed && !s.extra;
   const hot = isHot(date) && (s.kind === 'cardio' || s.outdoor);
+  const actionBlock = `${active
+    ? `<div class="card timer-card${active.pausedAt ? ' paused' : ''}"><div class="timer-label">${active.pausedAt ? 'Paused' : 'Elapsed'}</div><div class="timer num" id="elapsed">0:00</div>
+      <div class="start-row"><button class="btn-start" data-act="finish">Finish</button><button class="btn btn-gray btn-wide" data-act="pause">${active.pausedAt ? `${icon('play')}Resume` : `${icon('pause')}Pause`}</button></div></div>`
+    : `<div class="start-row"><button class="btn-start" data-act="start">${icon('play')}Start</button>${s.id === 'walks'
+      ? '<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
+      : `<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}`;
   // The rest bar stays outside the part an edge swipe moves, as a moved parent would pin the fixed bar to itself.
   return `<div class="pushed">
   <div class="back-row"><button class="back" data-act="close-session">${icon('caret-left')}<span>${ui.tab === 'today' ? 'Today' : 'Train'}</span></button></div>
   ${nav(esc(s.name), `${esc(dateText(date))}, about ${s.minutes} minutes${s.reps && s.id === 'intervals' ? `, ${s.reps} repeats` : ''}`)}
   <div class="chip-row"><span class="chip ${s.effort}">${eff.label}</span>${hr ? `<span class="chip num">${hr}</span>` : ''}<span class="chip">RPE ${eff.rpe}</span></div>
-  <p class="lede">${esc(eff.talk)}. ${esc(s.how)}</p>
-  ${foot(esc(s.why))}
+  ${actionBlock}
+  <p class="lede">${esc(eff.talk)}.</p>
+  <details class="how"><summary>How to do it</summary><p class="lede">${esc(s.how)}</p>${foot(esc(s.why))}</details>
   ${s.deload ? callout('arrow-clockwise', `<p>${esc(DELOAD)}</p>`) : ''}
   ${hot ? callout('thermometer-hot', `<p>${esc(s.outdoor ? HOT_LONGWALK : HOT)}</p>`, 'hot') : ''}
-  ${hr && s.kind !== 'strength' ? callout('watch', `<p>${esc(WATCH_ALERT)}</p>`) : ''}
+  ${hr && s.kind !== 'strength' && !state.settings?.watchSeen ? callout('watch', `<p>${esc(WATCH_ALERT)}</p><button class="btn btn-gray btn-sm" data-act="watch-seen">Got it</button>`) : ''}
   ${otherActive ? callout('warning', `<p>Another session is running (${esc(SESSIONS[state.active.id]?.name ?? '')}). Starting this one discards it.</p>`, 'warn') : ''}
-  ${active
-    ? `<div class="card timer-card${active.pausedAt ? ' paused' : ''}"><div class="timer-label">${active.pausedAt ? 'Paused' : 'Elapsed'}</div><div class="timer num" id="elapsed">0:00</div>
-      <div class="start-row"><button class="btn-start" data-act="finish">Finish</button><button class="btn btn-gray btn-wide" data-act="pause">${active.pausedAt ? `${icon('play')}Resume` : `${icon('pause')}Pause`}</button></div></div>`
-    : `<div class="start-row"><button class="btn-start" data-act="start">${icon('play')}Start</button>${s.id === 'walks'
-      ? '<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="10">Log a 10 min walk</button>'
-      : `<button class="btn btn-gray btn-wide" data-act="quick-log" data-n="${s.minutes}">Log as planned</button>`}</div>`}
-  ${placed && s.extra ? `<div class="group actions-group"><button class="cell cell-action danger" data-act="extra-del">${icon('x')}<span>Take it off this day</span></button></div>${foot('You added this session to the day. The plan itself does not change.')}` : ''}
+  ${placed && s.extra ? `<button class="text-danger" data-act="extra-del">Take it off this day</button>${foot('You added this session to the day. The plan itself does not change.')}` : ''}
   ${movable ? `<div class="group actions-group"><button class="cell cell-action" data-act="move-open">${icon('calendar-plus')}<span>Move to another day</span></button></div>${s.movedFrom ? foot(`Moved from ${esc(dateText(s.movedFrom))}. It still counts for its own week's plan.`) : ''}` : ''}
   ${s.id === 'intervals' && active ? '<div class="card phase" id="phase"></div>' : ''}
   ${s.id === 'intervals' ? foot(`Timing: 10 minutes easy, then ${s.reps} rounds of 2 minutes hard and 2 easy, then 5 minutes easy. Each change beeps and flashes the screen.`) : ''}
@@ -1438,7 +1447,7 @@ function recentCard(today) {
   <div class="group">${list.map((r) => `<button class="cell cell-button" data-act="open-session" data-id="${esc(r.id)}" data-date="${r.date}">
     <span class="tile effort">${icon(SESSIONS[r.id] ? sessionIcon(SESSIONS[r.id]) : 'barbell')}</span>
     <div class="cell-main"><div class="cell-title">${esc(r.name)}</div><div class="cell-sub">${esc(dateText(r.date, { weekday: 'short', day: 'numeric', month: 'short' }))}, ${duration(r.min)}${r.sets ? `, ${plural(r.sets, 'set', 'sets')}` : ''}${r.kg ? `, ${fmt(Math.round(r.kg))} kg` : ''}</div></div>
-    ${r.prs ? `<span class="pr" aria-label="${plural(r.prs, 'record', 'records')}">${icon('trophy')}${r.prs} PR</span>` : ''}<span class="accessory">${icon('caret-right')}</span></button>`).join('')}</div>`;
+    ${r.prs ? `<span class="pr" aria-label="${plural(r.prs, 'record', 'records')}">${icon('trophy')}${r.prs} ${r.prs === 1 ? 'best' : 'bests'}</span>` : ''}<span class="accessory">${icon('caret-right')}</span></button>`).join('')}</div>`;
 }
 
 function viewCharts() {
@@ -1462,7 +1471,7 @@ function viewCharts() {
   ${sectionHead('This week')}
   ${weekInsights(today)}
   <div class="group">
-    ${stat('Sessions done', `${wk.done} of ${wk.planned}`, bar(wk.done, wk.planned, 'gray'))}
+    ${stat('Sessions done', `${wk.done} of ${wk.planned}`, bar(wk.done, wk.planned, 'effort'))}
     ${stat('Exercise minutes', `${wk.exMin}${pos.before ? '' : ` of ${pos.block.targets.exMin}`}`, bar(wk.exMin, pos.before ? 0 : pos.block.targets.exMin, 'effort'))}
     ${stat('Training load', `${fmt(wk.load)} (RPE × min)`)}
     ${stat('Average steps', wk.stepsAvg != null ? fmt(wk.stepsAvg) : 'no data')}
@@ -1614,6 +1623,9 @@ function viewMore() {
   const action = (act, ic, kind, title, extra = '') => `<button class="cell cell-button" data-act="${act}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div>${extra}<span class="accessory">${icon('caret-right')}</span></button>`;
   const fileRow = (act, ic, kind, title) => `<label class="cell cell-button"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="accessory">${icon('caret-right')}</span><input type="file" accept=".json,application/json" data-act="${act}" hidden></label>`;
   return `${nav('More', 'Targets, reminders and your data')}
+  ${sectionHead('How you train')}
+  <div class="group"><div class="cell how-train"><span class="tile fuel">${icon('repeat')}</span><span class="cell-title">How you train</span>${segmented('train-mode', [['fixed', 'Fixed week'], ['rotation', 'Rotation']], (st.train === 'rotation') ? 'rotation' : 'fixed', 'How you train')}</div></div>
+  ${foot(st.train === 'rotation' ? 'Today shows the next session of the week you have not done, whatever weekday it was planned for. Nothing counts as missed.' : 'The same sessions on the same weekdays, every week.')}
   ${sectionHead('You and your targets')}
   ${profileForm(p)}
   ${sectionHead('Gym alerts')}
@@ -1713,14 +1725,13 @@ function sheetCheckIn() {
   const last = L.weighIns(state).filter(([x]) => x <= todayISO()).at(-1);
   const start = Math.round((last?.[1] ?? state.profile.startWeight) * 10) / 10;
   return `<div class="sheet">${sheetHead('Quick check-in')}
-    ${foot('Slide or tap to set your weight. Once a week keeps your trend honest.')}
+    ${foot('Tap the number to type it, or use the 0.1 steps. Once a week keeps your trend honest.')}
     <form data-form="checkin">
       <div class="card weigh">
         <button type="button" class="btn btn-gray num" data-act="weigh-step" data-n="-0.1" aria-label="0.1 kg less">−0.1</button>
         <label class="weigh-num"><input name="kg" inputmode="decimal" value="${start.toFixed(1)}" autocomplete="off" aria-label="Weight in kg" aria-describedby="weigh-error"><span class="big-unit">kg</span></label>
         <button type="button" class="btn btn-gray num" data-act="weigh-step" data-n="0.1" aria-label="0.1 kg more">+0.1</button>
       </div>
-      <input class="weigh-slide" type="range" name="slide" min="${(start - 10).toFixed(1)}" max="${(start + 10).toFixed(1)}" step="0.1" value="${start.toFixed(1)}" aria-label="Weight slider">
       <p class="sr-only" id="weigh-said" aria-live="polite"></p>
       ${formError('weigh-error')}
       <button class="btn-start" type="submit">Save &amp; start workout</button>
@@ -2559,6 +2570,7 @@ const ACT = {
     const from = ui.reportDays === 'start' ? state.profile.startDate : L.addDays(today, 1 - Number(ui.reportDays));
     shareFile(`steady-summary-${today}.pdf`, 'application/pdf', summaryPdf(L.doctorSummary(state, from, today), today));
   },
+  'watch-seen': () => { state.settings = { ...state.settings, watchSeen: true }; save(); render(); },
   'weigh-open': () => showSheet(sheetWeigh()),
   'weigh-step': (el) => {
     const input = el.closest('form').elements.kg;
@@ -3024,7 +3036,6 @@ document.addEventListener('submit', (e) => {
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'ex-q') { ui.exQuery = e.target.value; $('#ex-grid').innerHTML = exCards(); }
-  if (e.target.name === 'slide' && e.target.form?.elements.kg) e.target.form.elements.kg.value = Number(e.target.value).toFixed(1);
   if (e.target.id === 'food-q') $('#food-list').innerHTML = foodListItems(e.target.value);
 });
 document.addEventListener('keydown', (e) => {

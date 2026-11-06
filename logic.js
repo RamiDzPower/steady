@@ -1197,7 +1197,7 @@ function cleanSettings(s) {
     if (v && typeof v === 'object') reminders[r.id] = { on: v.on !== false, time: TIME.test(v.time) ? v.time : r.time };
   }
   const hot = arr(o.hotMonths, 12).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);
-  return { hotMonths: o.hotMonths ? [...new Set(hot)] : [3, 4, 5], loudBeep: o.loudBeep === true, train: o.train === 'rotation' ? 'rotation' : 'fixed', reminders };
+  return { hotMonths: o.hotMonths ? [...new Set(hot)] : [3, 4, 5], loudBeep: o.loudBeep === true, train: o.train === 'rotation' ? 'rotation' : 'fixed', watchSeen: o.watchSeen === true, reminders };
 }
 
 // Rebuilds a backup with known fields and types only.

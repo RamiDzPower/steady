@@ -560,8 +560,18 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 9;
+export const APP_VERSION = 10;
 export const CHANGES = [
+  {
+    version: 10,
+    notes: [
+      'The food ring now shows what is left, with a mark at your limit and "over" when you pass it.',
+      'Train opens with today\'s session and a Start button. How you train moved to More.',
+      'Session screens put Start and Log as planned first, the how-to sits under a tap, and the Watch tip shows until you say Got it.',
+      'Strength uses the exercise green, the switches use the same green, and weigh-in is one number with 0.1 steps.',
+      'Records read as bests, the exercise + button only shows during a workout, and the tab bar is easier to read.',
+    ],
+  },
   {
     version: 9,
     notes: [

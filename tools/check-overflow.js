@@ -86,9 +86,9 @@
     await sheet('#main [data-act=ex-new]', 'new exercise');
     await sheet('#main [data-act=ex-detail]', 'exercise detail');
     click('#main [data-act=train-view][data-id=schedule]');
-    click('#main [data-act=train-mode][data-id=rotation]'); check('train: rotation');
+    click('[data-tab=more]'); click('#main [data-act=train-mode][data-id=rotation]'); click('[data-tab=train]'); check('train: rotation');
     click('[data-tab=today]'); check('today: rotation');
-    click('[data-tab=train]'); click('#main [data-act=train-mode][data-id=fixed]');
+    click('[data-tab=more]'); click('#main [data-act=train-mode][data-id=fixed]'); click('[data-tab=train]');
     click('#main [data-act=week][data-n="7"]'); check('train, next week');
     // A logged session cannot move, so the move sheet is opened on one from next week.
     if (click('#main [data-act=open-session][data-id^=str], #main [data-act=open-session][data-id^=gym]')) {

@@ -352,7 +352,7 @@ test('backup import keeps known fields only', () => {
   assert.equal(out.labs[0].fbs, 108);
   assert.equal(out.labs[0].ldl, null);
   assert.equal(out.bp[0].t, '');
-  assert.deepEqual(out.settings, { hotMonths: [3, 4], loudBeep: false, train: 'fixed', reminders: { 'walk-lunch': { on: false, time: '13:00' } } });
+  assert.deepEqual(out.settings, { hotMonths: [3, 4], loudBeep: false, train: 'fixed', watchSeen: false, reminders: { 'walk-lunch': { on: false, time: '13:00' } } });
   assert.equal(L.esc(d.foods[0].name), '&lt;img src=x onerror=alert(1)&gt;');
 });
 

@@ -16,7 +16,7 @@
   --fuel: #eb6834;
   --water: #2a78d6;
   --effort: #199e70; /* 3.4:1 on a white card, as data marks need 3:1 */
-  --fuel-ink: #b4461a;
+  --fuel-ink: #a83f15;
   --water-ink: #1c5cab;
   --effort-ink: #0f7a54;
   --fuel-tile: #b4461a;
@@ -28,8 +28,8 @@
   --win-tile: #5856d6;
   --gray-tile: #747479; /* white text on it is 4.6:1, as the plan's tiles hold numbers */
   --danger: #d70015;
-  --switch-on: #34c759;
-  --glass: rgb(250 250 252 / 0.72);
+  --switch-on: var(--effort);
+  --glass: rgb(250 250 252 / 0.82);
   --glass-strong: rgb(250 250 252 / 0.86);
   --glass-line: rgb(0 0 0 / 0.07);
   --shadow-float: 0 10px 30px rgb(0 0 0 / 0.1), 0 1px 3px rgb(0 0 0 / 0.06);
@@ -67,7 +67,7 @@
     --win: #7d7aff;
     --win-ink: #8a88ff;
     --win-tile: #5856d6;
-    --switch-on: #30d158;
+    --switch-on: var(--effort);
     --glass: rgb(30 30 32 / 0.72);
     --glass-strong: rgb(38 38 40 / 0.88);
     --glass-line: rgb(255 255 255 / 0.08);
@@ -148,7 +148,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .back .i { width: 20px; height: 20px; }
 
 /* ---- Week strip ---- */
-.week-strip { display: grid; grid-template-columns: 26px repeat(7, 1fr) 26px; align-items: center; margin: 0 -6px 16px; }
+.week-strip { display: grid; grid-template-columns: 30px repeat(7, 1fr) 30px; align-items: center; margin: 0 -6px 16px; }
 .strip-nav { appearance: none; border: 0; background: none; position: relative; height: 44px; display: grid; place-items: center; color: var(--label-2); cursor: pointer; }
 .strip-nav .i { width: 16px; height: 16px; }
 /* Nine controls share the row, so an arrow cannot take 44 px across without its day: it takes the gutter and the strip's full height instead. */
@@ -368,7 +368,7 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 6px; font-
 .chip { display: inline-flex; align-items: center; min-height: 28px; padding: 0 12px; border-radius: 999px; background: var(--cell); font-size: 0.8rem; font-weight: 600; }
 .chip.easy, .chip.moderate { background: var(--effort-soft); color: var(--effort-ink); }
 .chip.hard { background: var(--fuel-soft); color: var(--fuel-ink); }
-.chip.strength { background: var(--water-soft); color: var(--water-ink); }
+.chip.strength { background: var(--effort-soft); color: var(--effort-ink); }
 .switch {
   appearance: none; -webkit-appearance: none; flex: none; position: relative; margin: 0;
   width: 51px; height: 31px; border-radius: 999px; background: var(--fill-2); cursor: pointer;
@@ -473,7 +473,7 @@ form[data-form="weigh"] { container-type: inline-size; }
 .zone-dot.easy { background: var(--effort-soft); box-shadow: inset 0 0 0 1.5px var(--effort); }
 .zone-dot.moderate { background: var(--effort); }
 .zone-dot.hard { background: var(--fuel); }
-.zone-dot.strength { background: var(--water); }
+.zone-dot.strength { background: var(--effort); }
 .group:has(.zone-dot) { --inset: 38px; }
 .timer-card { padding: 16px 16px 8px; margin-top: 16px; text-align: center; }
 .timer-label { font-size: 0.8rem; font-weight: 600; color: var(--label-2); }
@@ -819,7 +819,6 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .pr .i { width: 14px; height: 14px; }
 
 /* ---- Quick check-in ---- */
-.weigh-slide { display: block; width: 100%; height: 44px; margin: 4px 0 12px; accent-color: var(--label); } /* neutral: green is exercise */
 .check-links { display: grid; gap: 2px; margin-top: 6px; }
 .check-links .btn { color: var(--label-2); }
 
@@ -905,3 +904,13 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .spark { display: block; width: 100%; height: 52px; }
 .link-btn { appearance: none; border: 0; background: none; color: var(--tint, var(--label)); font: inherit; font-size: 0.88rem; font-weight: 600; padding: 12px 4px; margin: 0 0 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; position: relative; }
 .link-btn::after { content: ""; position: absolute; inset: -4px -8px; }
+
+/* Release 10 */
+.ring-notch { stroke: var(--label); stroke-width: 3; stroke-linecap: round; }
+.how { margin: 0 0 12px; }
+.how summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; color: var(--label-2); padding: 8px 0; }
+.text-danger { appearance: none; border: 0; background: none; color: var(--danger, #d70015); font: inherit; font-size: 0.88rem; font-weight: 600; padding: 12px 4px; cursor: pointer; position: relative; }
+.text-danger::after { content: ""; position: absolute; inset: -4px -8px; }
+.today-card { padding: 16px; margin-bottom: 12px; }
+.today-name { font-size: 1.3rem; font-weight: 700; margin: 2px 0 0; }
+.today-card .btn-start { margin-top: 12px; }
