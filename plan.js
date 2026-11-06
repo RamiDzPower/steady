@@ -560,8 +560,16 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 12;
+export const APP_VERSION = 13;
 export const CHANGES = [
+  {
+    version: 13,
+    notes: [
+      'The tab bar is clearer glass now, with a big Start button in the middle. Start opens today\'s next session, or Resume when one is running.',
+      'A pill slides to the tab you pick, and each screen rises in instead of snapping.',
+      'Pages slide and buttons settle with a softer spring.',
+    ],
+  },
   {
     version: 12,
     notes: [

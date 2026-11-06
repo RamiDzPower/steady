@@ -144,6 +144,16 @@ function render(top = false) {
   $('#main').innerHTML = VIEWS[ui.screen]();
   rollRings();
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
+  const at = TABS.findIndex((t) => t[0] === ui.tab);
+  $('.tabs').style.setProperty('--col', at < 2 ? at : at + 1); // the big Start button holds the middle column
+  const go = $('.tabs .tab-go .go-label');
+  if (go) go.textContent = state.active ? 'Resume' : 'Start';
+  if (top) { // content rises in, a little after the one before it
+    const m = $('#main');
+    m.classList.remove('enter');
+    void m.offsetWidth;
+    m.classList.add('enter');
+  }
   const bare = ui.screen === 'setup' || (ui.screen === 'session' && !!state.active); // a running workout gets the whole screen
   $('.tabs').hidden = bare;
   document.body.classList.toggle('no-tabs', bare);
@@ -2662,6 +2672,14 @@ const ACT = {
     shareFile(`steady-summary-${today}.pdf`, 'application/pdf', summaryPdf(L.doctorSummary(state, from, today), today));
   },
   'watch-seen': () => { state.settings = { ...state.settings, watchSeen: true }; save(); render(); },
+  go: () => {
+    if (state.active) return ACT['open-session']({ dataset: { id: state.active.id, date: state.active.date } });
+    const today = todayISO();
+    const ss = sessionsOn(today);
+    const next = ss.find((x) => x.kind !== 'rest' && x.id !== 'walks' && !state.days[today]?.workouts?.some((w) => w.id === x.id)) ?? ss.find((x) => x.kind !== 'rest' && !state.days[today]?.workouts?.some((w) => w.id === x.id));
+    if (!next) { ui.tab = ui.screen = 'train'; ui.week = null; return render(true); }
+    ACT['open-session']({ dataset: { id: next.id, date: today } });
+  },
   'settings-open': () => { ui.screen = 'settings'; ui.settingsPage = null; render(true); },
   'settings-close': () => { ui.screen = ui.tab; ui.settingsPage = null; render(true); },
   'settings-page': (el) => { ui.settingsPage = el.dataset.id || null; render(true); },
@@ -3061,7 +3079,8 @@ async function importFile(input, kind) {
 }
 
 // ---------- Wiring ----------
-$('.tabs').innerHTML = TABS.map(([id, label, ic]) => `<button type="button" data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`).join('');
+const tabBtn = ([id, label, ic]) => `<button type="button" data-act="tab" data-tab="${id}">${icon(ic)}<span>${label}</span></button>`;
+$('.tabs').innerHTML = `${TABS.slice(0, 2).map(tabBtn).join('')}<button type="button" class="tab-go" data-act="go"><span class="go-disc">${icon('play')}</span><span class="go-label">Start</span></button>${TABS.slice(2).map(tabBtn).join('')}`;
 
 // One-shot actions, toggles, remove buttons and forms, the app's idempotency keys: a repeat within 600 ms is the same tap, so a double tap on a button neither switches a toggle back nor removes the row that moves up, and a second tap on Undo or the flash, which stop taking taps, cannot reach what lies under them. Ticks and switches are not guarded. Taps meant to add up, like +250 ml, stay out.
 const ONCE = new Set(['plan-add', 'ex-add', 'form:exnew', 'move-to', 'ex-swap-set', 'checkin-skip', 'form:checkin', 'finish', 'quick-log', 'add-food', 'add-recent', 'same-yesterday', 'exclude', 'shop-share', 'doctor-pdf', 'hold-done', 'rest-skip',
