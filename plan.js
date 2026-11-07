@@ -560,8 +560,16 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 13;
+export const APP_VERSION = 14;
 export const CHANGES = [
+  {
+    version: 14,
+    notes: [
+      'Calmer motion: buttons and the tab bar no longer bounce. The tab pill stretches a little as it slides, and going back or closing a sheet is quicker than opening.',
+      'Ticking a set or logging a meal gives a short pulse, and the new tick fades in.',
+      'A meal row stretches when you pull it past its end, and tips grow out from where you tapped.',
+    ],
+  },
   {
     version: 13,
     notes: [

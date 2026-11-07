@@ -36,7 +36,7 @@
   --r-group: 20px;
   --r-card: 20px; /* one corner radius for cards and groups */
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  --spring: cubic-bezier(0.34, 1.45, 0.5, 1);
+  --move: cubic-bezier(0.65, 0, 0.35, 1); /* ease-in-out, for things that move from one place on screen to another */
   --font: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
   --font-round: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
 }
@@ -571,7 +571,7 @@ ol.steps li::before {
 @supports (interpolate-size: allow-keywords) {
   @media (prefers-reduced-motion: no-preference) {
     details { interpolate-size: allow-keywords; }
-    details::details-content { block-size: 0; overflow-y: clip; transition: block-size 0.35s var(--ease), content-visibility 0.35s allow-discrete; }
+    details::details-content { block-size: 0; overflow-y: clip; transition: block-size 0.25s var(--ease), content-visibility 0.25s allow-discrete; }
     details[open]::details-content { block-size: auto; }
     details.plain summary .i, .cell-details > summary .accessory .i { transition-duration: 0.35s; }
   }
@@ -675,7 +675,7 @@ dialog#sheet {
 }
 @starting-style { dialog#sheet[open] { transform: translateY(100%); } }
 /* On its way down it takes no taps, so a second tap on Save or Add cannot land on it. */
-dialog#sheet.closing { transform: translateY(100%) !important; pointer-events: none; }
+dialog#sheet.closing { transform: translateY(100%) !important; pointer-events: none; transition-duration: 0.3s; }
 dialog#sheet::backdrop { background: rgb(0 0 0 / 0.32); transition: opacity 0.3s ease; animation: fade-in 0.25s ease; }
 dialog#sheet.closing::backdrop { opacity: 0; }
 @keyframes fade-in { from { opacity: 0; } }
@@ -693,7 +693,9 @@ dialog#sheet.closing::backdrop { opacity: 0; }
   background: var(--glass-strong); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
   border: 0.5px solid var(--glass-line); box-shadow: var(--shadow-float);
   color: var(--label); font-size: 0.8rem; line-height: 1.4; white-space: pre-line;
+  transition: opacity 0.15s ease-out, scale 0.15s var(--ease);
 }
+@starting-style { #tip:not([hidden]) { opacity: 0; scale: 0.95; } }
 /* Centred by its margins between two insets, not by left: 50%, which would cap its shrink-to-fit width at half the screen. */
 #toast {
   position: fixed; left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 40;
@@ -704,7 +706,7 @@ dialog#sheet.closing::backdrop { opacity: 0; }
   opacity: 0; pointer-events: none; transform: translateY(8px);
   transition: opacity 0.2s ease, transform 0.3s var(--ease);
 }
-#toast.show { opacity: 1; transform: none; }
+#toast.show { opacity: 1; transform: none; transition-duration: 0.25s, 0.38s; }
 #toast.has-btn { pointer-events: auto; padding: 8px 8px 8px 16px; }
 .toast-undo { background: var(--label); color: var(--inverse); }
 .update {
@@ -746,6 +748,7 @@ html[data-slide] .navbar { opacity: 0; transition: none; }
 body:has(> .under) .navbar { opacity: 0; }
 @media (prefers-reduced-motion: no-preference) {
   html[data-slide]::view-transition-old(root), html[data-slide]::view-transition-new(root) { animation: 0.46s var(--ease) both; mix-blend-mode: normal; }
+  html[data-slide="pop"]::view-transition-old(root), html[data-slide="pop"]::view-transition-new(root) { animation-duration: 0.37s; }
   html[data-slide]::view-transition-image-pair(root) { background: #000; } /* what the screen behind dims towards */
   html[data-slide="push"]::view-transition-old(root) { animation-name: to-behind; }
   html[data-slide="push"]::view-transition-new(root) { animation-name: from-right; }
@@ -862,7 +865,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
    It lands on touch-down: text controls dim at once and fade back on release, filled ones shrink a little. */
 .back, .strip-nav, .as-link, .segmented button { transition: opacity 0.2s ease; }
 .back:active, .strip-nav:active, .as-link:active, .segmented button:active, .tabs button:active { opacity: 0.55; transition-duration: 0s; }
-.btn, .btn-start, .icon-btn, .setbtn, .chip-btn { transition: transform 0.5s var(--spring), background-color 0.25s ease; }
+.btn, .btn-start, .icon-btn, .setbtn, .chip-btn { transition: transform 0.25s var(--ease), background-color 0.25s ease; }
 :is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn):active:not(:disabled) { transform: scale(0.97); transition-duration: 0.1s, 0.2s; transition-timing-function: var(--ease), ease; }
 .round-check:active { transform: scale(0.95); }
 .day:not(.sel):active .dn { background: var(--fill); transition-duration: 0s; }
@@ -938,27 +941,35 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
   overflow: visible;
 }
 /* One pill slides to the tab you chose, with a little overshoot */
-.tabs::before { content: ""; position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 5); border-radius: 999px; background: var(--bar-pill); transform: translateX(calc(var(--col, 0) * 100%)); transition: transform 0.55s var(--spring); }
+.tabs::before { content: ""; position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 5); border-radius: 999px; background: var(--bar-pill); transform: translateX(calc(var(--col, 0) * 100%)); transition: transform 0.4s var(--move); }
+.tabs.moving::before { animation: stretch 0.4s var(--move); }
+@keyframes stretch { 50% { scale: 1.12 1; } }
 .tabs button { position: relative; z-index: 1; color: color-mix(in srgb, var(--label) 64%, transparent); }
 .tabs button[aria-current="page"] { color: var(--label); }
-.tabs button[aria-current="page"] .i { animation: tab-pop 0.5s var(--spring); }
-@keyframes tab-pop { 0% { transform: scale(0.8); } 100% { transform: scale(1); } }
+.tabs button[aria-current="page"] .i { animation: tab-pop 0.3s var(--ease); }
+@keyframes tab-pop { from { transform: scale(0.85); } }
 .tab-go { padding-top: 0 !important; color: var(--label) !important; }
-.tab-go .go-disc { display: grid; place-items: center; width: 58px; height: 58px; margin-top: -32px; border-radius: 50%; background: var(--label); color: var(--inverse); box-shadow: 0 8px 20px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.3); transition: transform 0.5s var(--spring); }
+.tab-go .go-disc { display: grid; place-items: center; width: 58px; height: 58px; margin-top: -32px; border-radius: 50%; background: var(--label); color: var(--inverse); box-shadow: 0 8px 20px rgb(0 0 0 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.3); transition: transform 0.25s var(--ease); }
 .tab-go .go-disc .i { width: 26px; height: 26px; }
 .tab-go:active .go-disc { transform: scale(0.92); transition-duration: 0.1s; }
 .tab-go .go-label { margin-top: 2px; font-weight: 700; }
 .tab-go:active { opacity: 1 !important; }
 @media (prefers-reduced-motion: no-preference) {
   #main.enter > * { animation: rise 0.55s var(--ease) backwards; }
-  #main.enter > :nth-child(2) { animation-delay: 0.04s; }
-  #main.enter > :nth-child(3) { animation-delay: 0.08s; }
-  #main.enter > :nth-child(4) { animation-delay: 0.12s; }
-  #main.enter > :nth-child(5) { animation-delay: 0.16s; }
-  #main.enter > :nth-child(6) { animation-delay: 0.2s; }
-  #main.enter > :nth-child(n+7) { animation-delay: 0.24s; }
+  #main.enter > :nth-child(2) { animation-delay: 0.03s; }
+  #main.enter > :nth-child(3) { animation-delay: 0.06s; }
+  #main.enter > :nth-child(4) { animation-delay: 0.09s; }
+  #main.enter > :nth-child(5) { animation-delay: 0.12s; }
+  #main.enter > :nth-child(6) { animation-delay: 0.15s; }
+  #main.enter > :nth-child(n+7) { animation-delay: 0.18s; }
 }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
-.segmented button, .chip-btn, .cell-button { transition: background-color 0.25s ease, color 0.25s ease, opacity 0.2s ease, transform 0.5s var(--spring); }
+.segmented button, .chip-btn, .cell-button { transition: background-color 0.25s ease, color 0.25s ease, opacity 0.2s ease, transform 0.25s var(--ease); }
 @media (prefers-reduced-transparency: reduce) { .tabs { background: var(--cell); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 @media (prefers-contrast: more) { .tabs { background: var(--cell); -webkit-backdrop-filter: none; backdrop-filter: none; } .tabs button { color: var(--label-2); } }
+
+/* A control a tap just switched on pulses once, and its new icon fades in from a blur */
+.pop { animation: pulse 0.3s var(--ease); }
+.pop .i { animation: icon-in 0.25s var(--ease); }
+@keyframes pulse { 40% { scale: 1.06; } }
+@keyframes icon-in { from { opacity: 0; filter: blur(3px); scale: 0.6; } }

@@ -132,6 +132,8 @@ function applyTheme() {
 // ---------- Rendering ----------
 const VIEWS = { today: viewToday, train: viewTrain, food: viewFood, progress: viewProgress, settings: viewSettings, session: viewSession, setup: viewSetup };
 
+// The control a tap just switched on gets a short pulse and its new icon fades in, as a re-render replaces it.
+let pressed = null;
 function render(top = false) {
   stopTicker();
   applyTheme();
@@ -142,10 +144,20 @@ function render(top = false) {
   const focusKey = top ? null : keyOf(document.activeElement);
   const chipX = $('#main .chips')?.scrollLeft ?? 0;
   $('#main').innerHTML = VIEWS[ui.screen]();
+  const pk = pressed;
+  pressed = null;
+  const now = pk?.key && pk.was !== 'true' && document.querySelector(pk.key);
+  if (now?.getAttribute('aria-pressed') === 'true') now.classList.add('pop');
   rollRings();
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-current', b.dataset.tab === ui.tab ? 'page' : 'false'));
   const at = TABS.findIndex((t) => t[0] === ui.tab);
-  $('.tabs').style.setProperty('--col', at < 2 ? at : at + 1); // the big Start button holds the middle column
+  const bar = $('.tabs'), col = String(at < 2 ? at : at + 1); // the big Start button holds the middle column
+  if (bar.style.getPropertyValue('--col') !== col) {
+    bar.style.setProperty('--col', col);
+    bar.classList.remove('moving');
+    void bar.offsetWidth;
+    bar.classList.add('moving');
+  }
   const go = $('.tabs .tab-go .go-label');
   if (go) go.textContent = state.active ? 'Resume' : 'Start';
   if (top) { // content rises in, a little after the one before it
@@ -1886,7 +1898,8 @@ function swipeRow(e) {
     if (!axis && Math.abs(dx) + Math.abs(dy) > 8) axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     if (axis !== 'x') return;
     row.classList.add('drag');
-    const x = Math.min(0, Math.max(-W, base + dx));
+    const raw = base + dx;
+    const x = raw > 0 ? rubberband(raw, W) : raw < -W ? -W - rubberband(-W - raw, W) : raw;
     front.style.transition = 'none';
     front.style.transform = `translateX(${x}px)`;
     v = (x - last) / Math.max(1, m.timeStamp - lastT);
@@ -2061,7 +2074,9 @@ function showTip(el, e) {
   tip.hidden = false;
   const r = tip.getBoundingClientRect();
   tip.style.left = `${Math.min(Math.max(8, e.clientX - r.width / 2), window.innerWidth - r.width - 8)}px`;
-  tip.style.top = `${e.clientY - r.height - 14 < 8 ? e.clientY + 18 : e.clientY - r.height - 14}px`;
+  const below = e.clientY - r.height - 14 < 8;
+  tip.style.top = `${below ? e.clientY + 18 : e.clientY - r.height - 14}px`;
+  tip.style.transformOrigin = below ? '50% 0' : '50% 100%';
 }
 function hideTip() {
   $('#tip').hidden = true;
@@ -3133,6 +3148,7 @@ document.addEventListener('click', (e) => {
   const fn = ACT[el.dataset.act];
   if (fn) {
     e.preventDefault();
+    pressed = el.hasAttribute('aria-pressed') ? { key: keyOf(el), was: el.getAttribute('aria-pressed') } : null;
     if (!repeated(el.dataset.act, e, Object.values(el.dataset).join())) fn(el);
   }
 });
