@@ -83,3 +83,7 @@ rm -rf '/private/tmp/${local_app_data}\Chrome\Cache'
 ## Icons
 
 `build_icons.py` turns the Phosphor SVGs in `phosphor/` into `icons.js`, and `make_icons.py` draws the app icons. Their first lines say how to run them.
+
+## README screenshots
+
+`readme-shots.sh` loads the demo state for today and saves eight screens to `docs/screenshots` at 390 x 844 and 2x, the last one in dark mode. Run it from the repo with `zsh tools/readme-shots.sh`.
