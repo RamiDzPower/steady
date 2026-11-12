@@ -1681,7 +1681,7 @@ function viewSetup() {
 const SETTINGS_PAGES = ['profile', 'train', 'alerts', 'reminders', 'look', 'data', 'about'];
 const THEMES = [['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']];
 function settingsRow(page, ic, kind, title, value) {
-  return `<button class="cell cell-button" data-act="settings-page" data-id="${page}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main"><div class="cell-title">${title}</div></div><span class="cell-value">${esc(value)}</span><span class="accessory">${icon('caret-right')}</span></button>`;
+  return `<button class="cell cell-button" data-act="settings-page" data-id="${page}"><span class="tile ${kind}">${icon(ic)}</span><div class="cell-main set-main"><div class="cell-title">${title}</div><span class="cell-value">${esc(value)}</span></div><span class="accessory">${icon('caret-right')}</span></button>`;
 }
 
 function viewSettings() {

@@ -158,7 +158,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .strip-nav:last-child::after { right: -6px; }
 .day { appearance: none; border: 0; background: none; display: grid; justify-items: center; gap: 3px; padding: 4px 0; cursor: pointer; }
 .dow { font-size: 0.7rem; font-weight: 600; color: var(--label-2); }
-.dn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: 1rem; font-weight: 600; transition: background-color 0.2s ease; }
+.dn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: min(1rem, 20px); font-weight: 600; transition: background-color 0.2s ease; }
 .day.now .dn { color: var(--effort-ink); }
 .day.sel .dn { background: var(--label); color: var(--inverse); }
 .mark { width: 5px; height: 5px; border-radius: 50%; }
@@ -438,7 +438,7 @@ details.plain[open] summary .i { transform: rotate(90deg); }
 
 /* ---- Today ---- */
 .water-card { padding: 12px; }
-.water-btns { display: flex; align-items: center; gap: 8px; }
+.water-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; } /* at the largest text sizes the pills go on to a second row */
 .water-btns .btn { flex: 1; padding: 0 8px; white-space: nowrap; min-height: 32px; }
 .water-btns .btn::after { inset: -6px 0; }
 .water-btns .icon-btn { width: 32px; height: 32px; }
@@ -661,7 +661,7 @@ ol.steps li::before {
 }
 .tabs button {
   appearance: none; border: 0; background: none; display: grid; justify-items: center; gap: 2px;
-  padding: 8px 2px 5px; border-radius: 999px; color: var(--label-2); font-size: 0.7rem; font-weight: 600; cursor: pointer;
+  padding: 8px 2px 5px; border-radius: 999px; color: var(--label-2); font-size: min(0.7rem, 13px); font-weight: 600; cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 .tabs .i { width: 24px; height: 24px; }
@@ -983,3 +983,22 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .pop .i { animation: icon-in 0.25s var(--ease); }
 @keyframes pulse { 40% { scale: 1.06; } }
 @keyframes icon-in { from { opacity: 0; filter: blur(3px); scale: 0.6; } }
+
+/* Settings rows: the value sits beside the title, and under it once the two no longer fit (very large text), so no word is broken */
+.set-main { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 12px; row-gap: 2px; }
+.set-main .cell-title { overflow-wrap: normal; }
+.set-main .cell-value { margin-left: auto; max-width: none; overflow-wrap: normal; }
+
+/* At the accessibility text sizes iOS grows titles and big numbers far less than body text. These caps do the same,
+   so no word is split across lines and the numbers stay inside their rings. At the default size none of them applies. */
+.nav-title { font-size: min(2rem, 48px); }
+.section-head h2, .sheet-head h2, .today-name { font-size: min(1.3rem, 36px); }
+.tile-num, .chart-big .num { font-size: min(1.65rem, 40px); }
+.hero-num, .streak-num, .rest-time { font-size: min(2rem, 48px); }
+.hero-num .big-unit { font-size: min(1.3rem, 30px); }
+.ring-val .num { font-size: min(1.3rem, 26px); }
+.ring-val .unit, .dow { font-size: min(0.7rem, 13px); }
+.ring-name, .ring-of { font-size: min(0.8rem, 17px); }
+@media (max-width: 370px) { .ring-val .num { font-size: min(1rem, 20px); } }
+.navbar { font-size: min(1rem, 22px); } /* the bar is 44 px tall */
+#navbar-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

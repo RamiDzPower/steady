@@ -560,8 +560,15 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 15;
+export const APP_VERSION = 16;
 export const CHANGES = [
+  {
+    version: 16,
+    notes: [
+      'Works with the largest iPhone text sizes: titles and big numbers grow less than body text, so words are not split and numbers stay inside their rings.',
+      'At large text, the week strip keeps its numbers inside their circles, the water buttons go on to a second row, and Settings puts a value under its name when the two do not fit.',
+    ],
+  },
   {
     version: 15,
     notes: [

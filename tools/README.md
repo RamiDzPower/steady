@@ -87,3 +87,16 @@ rm -rf '/private/tmp/${local_app_data}\Chrome\Cache'
 ## README screenshots
 
 `readme-shots.sh` loads the demo state for today and saves eight screens to `docs/screenshots` at 390 x 844 and 2x, the last one in dark mode. Run it from the repo with `zsh tools/readme-shots.sh`.
+
+## iPhone Simulator
+
+`sim.sh` runs the app in the iOS Simulator's Safari, which is the WebKit your phone uses, with the demo state for today. It is the way to check the large accessibility text sizes and real Safari rendering, which Chrome cannot show:
+
+```sh
+zsh tools/sim.sh setup
+zsh tools/sim.sh shot today-ax5 today accessibility-extra-extra-extra-large light
+zsh tools/sim.sh shot charts progress/progress-view=charts:1400 large dark
+zsh tools/sim.sh down
+```
+
+It serves a copy from `/private/tmp/steady-sim` (with a service worker that removes itself and no HTTP caching), so the repo is never touched. Taps, swipes and VoiceOver can't be scripted this way; use the Simulator window or the phone for those.
