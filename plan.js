@@ -567,6 +567,7 @@ export const CHANGES = [
     notes: [
       'Works with the largest iPhone text sizes: titles and big numbers grow less than body text, so words are not split and numbers stay inside their rings.',
       'At large text, the week strip keeps its numbers inside their circles, the water buttons go on to a second row, and Settings puts a value under its name when the two do not fit.',
+      'Tab bar labels stay the same size at any text size, and the title bar at the top no longer spills out of its strip.',
     ],
   },
   {
