@@ -248,7 +248,7 @@ button, .round-check { touch-action: manipulation; -webkit-user-select: none; us
 .section-meta { font-size: 0.8rem; color: var(--label-2); text-align: right; font-variant-numeric: tabular-nums; }
 .group-label { margin: 16px 16px 8px; font-size: 0.8rem; font-weight: 600; color: var(--label-2); }
 /* A list label with its own action, like the plus on each meal: a smaller circle, still a 44 px target, raised so the first row below cannot cover it. */
-.group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 16px 2px; }
+.group-head { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 16px 2px; }
 .group-head .group-label { margin: 0; }
 .group-head .icon-btn { width: 28px; height: 28px; z-index: 1; }
 .group-head .icon-btn::after { inset: -8px; }
@@ -289,7 +289,7 @@ span.accessory.done { display: inline-flex; align-items: center; gap: 8px; font-
 .cell > .as-link { position: relative; }
 .cell > .as-link::after { content: ""; position: absolute; inset: -10px 0; }
 .cell-button, .cell-action { cursor: pointer; transition: background-color 0.15s ease; }
-.cell-button:active, .cell-action:active { background: var(--fill); transition-duration: 0s; }
+.cell-button:active, .cell-action:active, .cell-details > summary:active { background: var(--fill); transition-duration: 0s; }
 .cell-action { gap: 12px; font-weight: 600; }
 .cell-action .i { width: 22px; height: 22px; color: var(--label); }
 .cell-action:disabled { opacity: 0.4; cursor: default; }
@@ -412,7 +412,7 @@ input.time:focus-visible { outline-offset: -4px; } /* the ring hugs the fill, no
 .field { cursor: text; flex-wrap: wrap; row-gap: 4px; }
 .field-label { flex: none; font-size: 1rem; }
 .field input, .field select {
-  flex: 1; min-width: 3em; width: 100%; padding: 8px 0; margin: 0; border: 0; background: none; outline: none;
+  flex: 1; min-width: 3em; width: 100%; padding: 4px 0; margin: 0; border: 0; background: none; outline: none;
   text-align: right; color: var(--label); font: inherit; font-size: max(1rem, 16px);
 }
 input::placeholder, textarea::placeholder { color: var(--label-2); opacity: 1; } /* placeholders are text, so 4.5:1 */
@@ -518,6 +518,7 @@ body.no-tabs:has(.rest:not([hidden])) :is(#toast, .update) { bottom: calc(24px +
 .ex-last { margin-top: 8px; font-size: 0.8rem; font-weight: 500; line-height: 1.38; color: var(--effort-ink); }
 .ex-log { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .pill-field { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 12px; background: var(--fill); cursor: text; }
+.pill-field:focus-within, .search:focus-within { background: var(--fill-2); }
 .pill-field span { font-size: 0.8rem; font-weight: 600; color: var(--label-2); }
 .pill-field input { flex: 1; min-width: 0; border: 0; background: none; outline: none; text-align: right; color: var(--label); font: 600 max(1rem, 16px) var(--font-round); }
 .sets { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
@@ -681,9 +682,9 @@ dialog#sheet.closing::backdrop { opacity: 0; }
 @keyframes fade-in { from { opacity: 0; } }
 .sheet { max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(24px + env(safe-area-inset-bottom)); }
 /* The grabber row and the title row are the drag handle; the browser leaves those touches to the script. */
-.grabber { position: relative; height: 22px; margin: 0 -16px; touch-action: none; }
+.grabber { position: relative; height: 22px; margin: 0 -16px; touch-action: pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .grabber::before { content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--label-3); opacity: 0.5; }
-.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 16px; padding: 8px 4px 0; touch-action: none; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 16px; padding: 8px 4px 0; touch-action: pinch-zoom; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .sheet-head h2 { margin: 0; font-size: 1.3rem; line-height: 1.27; letter-spacing: 0; }
 .sheet .segmented { margin-bottom: 12px; }
 .sheet .chips { margin-bottom: 2px; }
@@ -727,7 +728,10 @@ body:has(.rest:not([hidden])) :is(#toast, .update) { bottom: calc(104px + var(--
    A squircle hugs its corner more than a circle does, so each radius grows by about 1.7 to look the same size; pills and circles stay round. */
 @supports (corner-shape: squircle) {
   :root { --r-group: 34px; --r-card: 37px; }
-  .card, .tile-card, .callout, .group, .tile, .app-icon, .btn-start, .segmented, .segmented button, .rpe button, .month span, dialog#sheet { corner-shape: squircle; }
+  .card, .tile-card, .callout, .group, .tile, .app-icon, .btn-start, .segmented, .segmented button, .rpe button, .month span, dialog#sheet, .ex-card, .ex-thumb, .btn.btn-wide:not(.btn-plain), .pill-field, .badge, .ex-hero { corner-shape: squircle; }
+  .btn.btn-wide:not(.btn-plain), .ex-hero { border-radius: 27px; }
+  .pill-field { border-radius: 20px; }
+  .badge { border-radius: 24px; }
   .tile { border-radius: 14px; }
   .tile-lg, .rpe button { border-radius: 20px; }
   .app-icon { border-radius: 34px; }
@@ -770,7 +774,7 @@ body:has(> .under) #main { max-width: none; margin: 0; padding-inline: max(16px,
 
 /* ---- Activity grid and the New best line ---- */
 .heat-card { padding: 16px; }
-.heat { touch-action: pan-y; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 4px; }
+.heat { touch-action: pan-y pinch-zoom; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 4px; }
 .heat-cell { appearance: none; border: 0; padding: 0; margin: 0; display: block; position: relative; min-width: 0; aspect-ratio: 1; border-radius: 4px; background: var(--fill); }
 button.heat-cell { cursor: pointer; }
 button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* neighbouring squares meet halfway, so no tap lands in a gap */
@@ -783,7 +787,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .heat-legend .heat-cell { width: 12px; flex: none; }
 .heat-legend span:first-child { margin-right: 2px; }
 .heat-legend span:last-child { margin-left: 2px; }
-.ex-best { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.88rem; font-weight: 600; line-height: 1.33; color: var(--win-ink); }
+.ex-best { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.8rem; font-weight: 600; line-height: 1.38; color: var(--win-ink); }
 .ex-best .i { width: 16px; height: 16px; }
 
 /* ---- Overview: streak, challenges, grid by year, records ---- */
@@ -796,13 +800,14 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .flakes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .flake { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--fill); color: var(--label-3); }
 .flake.on { background: var(--win-soft); color: var(--win-ink); }
+.flake:not(.on) { background: none; box-shadow: inset 0 0 0 1.5px var(--label-3); }
 .flake .i { width: 15px; height: 15px; }
 .badges { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 16px 0 12px; padding: 0; list-style: none; }
 .badge { display: grid; justify-items: center; gap: 4px; padding: 12px 0 8px; border-radius: 14px; background: var(--fill); color: var(--label-2); font-size: 0.88rem; font-weight: 600; }
 .badge .i { width: 24px; height: 24px; color: var(--label-3); }
 .badge.on { color: var(--label); }
 .badge.on .i { color: var(--win-ink); }
-.streak-next { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 0.88rem; color: var(--label-2); }
+.streak-next { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 0.8rem; color: var(--label-2); }
 .streak-note { margin-top: 12px; font-size: 0.8rem; color: var(--label-2); }
 .challenges { padding: 0; }
 .cell-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px; }
@@ -813,9 +818,9 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .heat.y { gap: 2px; }
 .heat.y .heat-cell { border-radius: 2px; }
 .heat.y { grid-template-columns: repeat(52, minmax(0, 1fr)); }
-.heat-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; height: 14px; }
+.heat-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }
 .heat-months.y { grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 2px; }
-.heat-month { font-size: 0.7rem; line-height: 14px; color: var(--label-2); white-space: nowrap; overflow: visible; }
+.heat-month { font-size: 0.7rem; line-height: 1.2; color: var(--label-2); white-space: nowrap; overflow: visible; }
 .heat-foot { flex-wrap: wrap; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
 .heat-foot .heat-legend { margin-top: 0; }
 .heat-range { display: flex; gap: 8px; }
@@ -840,7 +845,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .ex-none { grid-column: 1 / -1; }
 .ex-card { display: grid; gap: 8px; padding: 12px; border-radius: var(--r-card); background: var(--cell); align-content: start; position: relative; }
 .ex-open { appearance: none; border: 0; background: none; padding: 0; margin: 0; display: grid; gap: 4px; text-align: left; cursor: pointer; color: inherit; min-width: 0; }
-.ex-thumb { display: grid; place-items: center; aspect-ratio: 1; border-radius: 14px; background: var(--cell-2); overflow: hidden; color: var(--label-3); }
+.ex-thumb { display: grid; place-items: center; aspect-ratio: 1; border-radius: calc(var(--r-card) - 12px); background: var(--cell-2); overflow: hidden; color: var(--label-3); }
 .ex-thumb .i { width: 36px; height: 36px; }
 .ex-thumb .ex-pic { width: 86%; height: auto; max-width: none; margin: 0; }
 .ex-card-name { margin-top: 4px; font-size: 1rem; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
@@ -852,7 +857,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 /* ---- Meal rows: swipe left for Swap ---- */
 .swipe-row { position: relative; overflow: hidden; }
 .swipe-row + .swipe-row > .cell::before { content: ""; position: absolute; top: 0; right: 0; left: var(--inset); border-top: 0.5px solid var(--sep); }
-.swipe-front { background: var(--cell); touch-action: pan-y; transition: transform 0.25s var(--ease); }
+.swipe-front { background: var(--cell); touch-action: pan-y pinch-zoom; transition: transform 0.25s var(--ease); }
 .swipe-row.open .swipe-front { transform: translateX(-88px); }
 .swipe-act { position: absolute; top: 0; right: 0; bottom: 0; width: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 0; background: var(--fill-2); color: var(--label); font-size: 0.8rem; font-weight: 600; visibility: hidden; cursor: pointer; }
 .swipe-row.open .swipe-act, .swipe-row.drag .swipe-act { visibility: visible; }
@@ -864,16 +869,21 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 /* ---- Press feedback ----
    It lands on touch-down: text controls dim at once and fade back on release, filled ones shrink a little. */
 .back, .strip-nav, .as-link, .segmented button { transition: opacity 0.2s ease; }
-.back:active, .strip-nav:active, .as-link:active, .segmented button:active, .tabs button:active { opacity: 0.55; transition-duration: 0s; }
-.btn, .btn-start, .icon-btn, .setbtn, .chip-btn { transition: transform 0.25s var(--ease), background-color 0.25s ease; }
-:is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn):active:not(:disabled) { transform: scale(0.97); transition-duration: 0.1s, 0.2s; transition-timing-function: var(--ease), ease; }
+.back:active, .strip-nav:active, .as-link:active, .segmented button:active, .tabs button:active, .ex-open:active, .swipe-act:active, .how summary:active, details.plain summary:active, .link:active, .link-btn:active, .text-danger:active { opacity: 0.55; transition-duration: 0s; }
+/* The chosen segment or tab keeps its look under the finger; only the others dim. */
+.segmented button[aria-pressed="true"]:active, .tabs button[aria-current="page"]:active { opacity: 1; }
+.month:active span { background: var(--fill-2); transition-duration: 0s; }
+.btn, .btn-start, .icon-btn, .setbtn, .chip-btn, .rpe button { transition: transform 0.25s var(--ease), background-color 0.25s ease; }
+:is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn, .rpe button):active:not(:disabled) { transform: scale(0.97); transition-duration: 0.1s, 0.2s; transition-timing-function: var(--ease), ease; }
 .round-check:active { transform: scale(0.95); }
 .day:not(.sel):active .dn { background: var(--fill); transition-duration: 0s; }
 
 /* Reduce Motion keeps fades and colour changes, as iOS does, and drops anything that slides, scales or spins. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-property: opacity, color, background-color, border-color !important; animation: none !important; }
-  :is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn):active:not(:disabled), .round-check:active { transform: none; }
+  :is(.btn, .btn-start, .icon-btn, .setbtn, .chip-btn, .rpe button):active:not(:disabled), .round-check:active { transform: none; }
+  /* Selection colours change at once, so a switch's track keeps up with its thumb; only opacity fades (the order follows the property list above). */
+  :is(.switch, .round-check, .segmented button, .chip-btn, .dn, .month span, .tabs button) { transition-duration: 0.2s, 0s, 0s, 0s !important; }
   dialog#sheet { transition: opacity 0.2s ease !important; }
   dialog#sheet.closing { transform: none !important; opacity: 0; }
   @starting-style { dialog#sheet[open] { transform: none; opacity: 0; } }
@@ -907,7 +917,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 .hero-num { font-size: 2rem; font-weight: 700; margin: 2px 0 0; }
 .hero-num .big-unit { font-size: 1.3rem; }
 .hero-none { font-size: 1.3rem; color: var(--label-2); font-weight: 600; }
-.hero-sub { margin: 2px 0 8px; color: var(--label-2); font-size: 0.88rem; }
+.hero-sub { margin: 2px 0 8px; color: var(--label-2); font-size: 0.8rem; }
 .spark { display: block; width: 100%; height: 52px; }
 .link-btn { appearance: none; border: 0; background: none; color: var(--tint, var(--label)); font: inherit; font-size: 0.88rem; font-weight: 600; padding: 12px 4px; margin: 0 0 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; position: relative; }
 .link-btn::after { content: ""; position: absolute; inset: -4px -8px; }
@@ -915,7 +925,7 @@ button.heat-cell::after { content: ""; position: absolute; inset: -2px; } /* nei
 /* Release 10 */
 .ring-notch { stroke: var(--label); stroke-width: 3; stroke-linecap: round; }
 .how { margin: 0 0 12px; }
-.how summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; color: var(--label-2); padding: 8px 0; }
+.how summary { cursor: pointer; font-weight: 600; font-size: 0.88rem; color: var(--label-2); padding: 12px 0; }
 .text-danger { appearance: none; border: 0; background: none; color: var(--danger, #d70015); font: inherit; font-size: 0.88rem; font-weight: 600; padding: 12px 4px; cursor: pointer; position: relative; }
 .text-danger::after { content: ""; position: absolute; inset: -4px -8px; }
 .today-card { padding: 16px; margin-bottom: 12px; }

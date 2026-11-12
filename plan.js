@@ -560,8 +560,18 @@ export const SHORTCUT_OUT = [
 ];
 
 // ---- What's new, shown once after an update. Raise APP_VERSION and add an entry, newest first, when the list changes. ----
-export const APP_VERSION = 14;
+export const APP_VERSION = 15;
 export const CHANGES = [
+  {
+    version: 15,
+    notes: [
+      'VoiceOver hears messages after a sheet closes, can step through each day on a chart, and is told how many searches matched.',
+      'Every tappable row, card and link now reacts to your finger, and the chosen tab or segment stays as it is while pressed.',
+      'Session screens hide the tab bar, so there is one Start on the screen. Settings pages slide in and out like other pages.',
+      'Dragging a sheet puts the keyboard away, a second finger no longer takes over a drag, and pinch zoom works on every screen.',
+      'A meal row held still before you let go settles where it is. Spent freezes show as an outline.',
+    ],
+  },
   {
     version: 14,
     notes: [

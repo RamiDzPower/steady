@@ -166,7 +166,7 @@ function render(top = false) {
     void m.offsetWidth;
     m.classList.add('enter');
   }
-  const bare = ui.screen === 'setup' || (ui.screen === 'session' && !!state.active); // a running workout gets the whole screen
+  const bare = ui.screen === 'setup' || ui.screen === 'session'; // a session has its own Start, and a running one gets the whole screen
   $('.tabs').hidden = bare;
   document.body.classList.toggle('no-tabs', bare);
   ui.onToday = ui.date === todayISO();
@@ -557,7 +557,7 @@ function viewExercises() {
   <div class="chips" role="group" aria-label="Body part">${['All', ...BODY_PARTS, 'Mine'].map((p) => `<button class="chip-btn" data-act="ex-part" data-id="${p}" aria-pressed="${ui.exPart === p}">${p}</button>`).join('')}</div>
   <div class="group actions-group"><button class="cell cell-action" data-act="ex-new">${icon('plus-circle')}<span>Create your own exercise</span></button></div>
   ${foot('Name it, pick a body part, and add it to a workout while you train. The + on a card adds that exercise to the workout that is running.')}
-  <div class="ex-grid" id="ex-grid">${exCards()}</div>`;
+  <p class="sr-only" id="ex-count" aria-live="polite"></p><div class="ex-grid" id="ex-grid">${exCards()}</div>`;
 }
 function sheetExNew() {
   const opt = (v, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${v}</option>`;
@@ -611,7 +611,7 @@ function todayCard() {
   if (!s) return '';
   const done = state.days[today]?.workouts?.some((w) => w.id === s.id);
   return `<section class="card today-card"><p class="streak-cap">Today</p><p class="today-name">${esc(s.name)}</p><p class="hero-sub">${s.exercises ? `${plural(s.exercises.length, 'exercise', 'exercises')}, ` : ''}about ${s.minutes} minutes${done ? ', done' : ''}</p>
-    <button class="btn-start" data-act="open-session" data-id="${s.id}" data-date="${today}">${icon(done ? 'check' : 'play')}${done ? 'Open' : 'Start'}</button></section>`;
+    <button class="btn btn-tinted effort btn-wide" data-act="open-session" data-id="${s.id}" data-date="${today}">${icon(done ? 'check' : 'caret-right')}${done ? 'Open' : 'Open the session'}</button></section>`;
 }
 
 function viewTrain() {
@@ -1081,7 +1081,7 @@ function sheetAddFood(query = '') {
     ${segmented('add-slot-seg', SLOTS.map((s) => [s, SLOT_LABEL[s]]), ui.addSlot, 'Meal')}
     <div class="chips compact" role="group" aria-label="Portion">${[0.5, 1, 1.5, 2].map((x) => `<button class="chip-btn" data-act="portion" data-n="${x}" aria-pressed="${ui.portion === x}">${x === 1 ? '1 portion' : `${x} portions`}</button>`).join('')}</div>
     <label class="search">${icon('magnifying-glass')}<input type="search" id="food-q" placeholder="Search meals, extras and your foods" value="${esc(query)}" autocomplete="off" aria-label="Search"></label>
-    <div class="group sheet-list" id="food-list">${foodListItems(query)}</div>
+    <p class="sr-only" id="food-count" aria-live="polite"></p><div class="group sheet-list" id="food-list">${foodListItems(query)}</div>
     ${sectionHead('Something else')}
     <form data-form="quick">
       <div class="group">
@@ -1187,12 +1187,12 @@ function legend(items) {
   return `<div class="legend">${items.map(([cls, label]) => `<span class="key"><i class="${cls}"></i>${label}</span>`).join('')}</div>`;
 }
 function chartBox(title, big, legendHtml, svg, hint = 'Tap a day for its numbers.') {
-  return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="${esc(title)}. ${hint}">${svg}</svg></section>`;
+  return `<section class="card chart"><div class="chart-head"><h3>${title}</h3>${big ? `<p class="chart-big">${big}</p>` : ''}</div>${legendHtml}<svg viewBox="0 0 ${CW} ${CH}" role="group" aria-label="${esc(title)}">${svg}</svg></section>`;
 }
 // Each small dot answers taps over the plot's height out to the midpoints with its neighbours; 29 units either way is 44 px on a 320 px phone.
-const dotHits = (xs, tips) => L.tapSpans(xs, 29, 0, CW).map(([l, r], i) => `<rect class="hit" x="${l.toFixed(1)}" y="${PT}" width="${(r - l).toFixed(1)}" height="${CH - PT - PB}" data-tip="${esc(tips[i])}"/>`).join('');
+const dotHits = (xs, tips) => L.tapSpans(xs, 29, 0, CW).map(([l, r], i) => `<rect class="hit" x="${l.toFixed(1)}" y="${PT}" width="${(r - l).toFixed(1)}" height="${CH - PT - PB}" data-tip="${esc(tips[i])}" role="img" aria-label="${esc(tips[i].replace(/\n/g, ', '))}"/>`).join('');
 function hits(n, bw, tip) {
-  return Array.from({ length: n }, (_, i) => `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${CH - PT - PB}" data-tip="${esc(tip(i))}"/>`).join('');
+  return Array.from({ length: n }, (_, i) => `<rect class="hit" x="${PL + i * bw}" y="${PT}" width="${bw}" height="${CH - PT - PB}" data-tip="${esc(tip(i))}" role="img" aria-label="${esc(tip(i).replace(/\n/g, ', '))}"/>`).join('');
 }
 const bigNum = (value, unit, label) => `<span class="num">${value}</span> <span class="big-unit">${unit}</span> <span class="big-label">${label}</span>`;
 
@@ -1891,9 +1891,10 @@ function swipeRow(e) {
   const was = row.classList.contains('open');
   document.querySelectorAll('.swipe-row.open').forEach((r) => { if (r !== row) { r.classList.remove('open'); r.querySelector('.swipe-front').style.transform = ''; } });
   const x0 = e.clientX, y0 = e.clientY;
-  let axis = null, last = 0, lastT = e.timeStamp, v = 0;
-  const base = was ? -W : 0;
+  let axis = null, last = 0, trail = [[e.timeStamp, 0]];
+  const base = new DOMMatrixReadOnly(getComputedStyle(front).transform).m41; // caught mid-slide, it carries on from where it is
   const move = (m) => {
+    if (m.pointerId !== e.pointerId) return;
     const dx = m.clientX - x0, dy = m.clientY - y0;
     if (!axis && Math.abs(dx) + Math.abs(dy) > 8) axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     if (axis !== 'x') return;
@@ -1902,10 +1903,11 @@ function swipeRow(e) {
     const x = raw > 0 ? rubberband(raw, W) : raw < -W ? -W - rubberband(-W - raw, W) : raw;
     front.style.transition = 'none';
     front.style.transform = `translateX(${x}px)`;
-    v = (x - last) / Math.max(1, m.timeStamp - lastT);
-    last = x; lastT = m.timeStamp;
+    last = x;
+    trail = [...trail.slice(-4), [m.timeStamp, x]];
   };
   const up = (u) => {
+    if (u.pointerId !== e.pointerId) return;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
@@ -1913,6 +1915,9 @@ function swipeRow(e) {
     row.classList.remove('drag');
     if (axis === 'x') {
       swipedAt = u.timeStamp;
+      // Velocity over the last 100 ms, so a row held still before letting go settles by position alone.
+      const recent = trail.filter(([t]) => u.timeStamp - t <= 100);
+      const v = recent.length > 1 ? (recent.at(-1)[1] - recent[0][1]) / Math.max(1, recent.at(-1)[0] - recent[0][0]) : 0;
       const open = u.type === 'pointerup' && (v < -0.3 || (v < 0.3 && last < -W / 2));
       row.classList.toggle('open', open);
       front.style.transform = '';
@@ -1935,11 +1940,15 @@ function dragSheet(e) {
   s.setPointerCapture(e.pointerId);
   s.style.transition = 'none';
   s.style.transform = `translateY(${from}px)`;
+  let moved = false;
   const move = (m) => {
+    if (m.pointerId !== e.pointerId) return; // a second finger does not take over the drag
+    if (!moved && Math.abs(m.clientY - start) > 8) { moved = true; if (s.contains(document.activeElement)) document.activeElement.blur(); } // the keyboard goes down with the sheet
     s.style.transform = `translateY(${at(m.clientY)}px)`;
     trail = [...trail.slice(-4), [m.timeStamp, m.clientY]];
   };
   const up = (u) => {
+    if (u.pointerId !== e.pointerId) return;
     s.removeEventListener('pointermove', move);
     s.removeEventListener('pointerup', up);
     s.removeEventListener('pointercancel', up);
@@ -1948,7 +1957,10 @@ function dragSheet(e) {
     const [t0, y0] = recent[0];
     const [t1, y1] = recent.at(-1);
     s.style.transition = '';
-    if (u.type === 'pointerup' && at(u.clientY) + project((y1 - y0) / Math.max(1, t1 - t0)) > h / 2) closeSheet();
+    if (u.type === 'pointerup' && at(u.clientY) + project((y1 - y0) / Math.max(1, t1 - t0)) > h / 2) {
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) s.style.setProperty('transform', s.style.transform, 'important'); // fade out where it was let go
+      closeSheet();
+    }
     else s.style.transform = '';
   };
   s.addEventListener('pointermove', move);
@@ -2106,11 +2118,25 @@ document.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse' && !e.buttons) return;
   heatTip(e);
 });
-let toastTimer = null;
+let toastTimer = null, toastHide = null;
+// The toast waits while VoiceOver or a keyboard is on it, and while the app is in the background.
+const toastRestart = () => { clearTimeout(toastTimer); if (toastHide) toastTimer = setTimeout(toastHide, 6000); };
+$('#toast').addEventListener('focusin', () => clearTimeout(toastTimer));
+$('#toast').addEventListener('focusout', toastRestart);
+document.addEventListener('visibilitychange', () => (document.hidden ? clearTimeout(toastTimer) : toastRestart()));
+let toastLater = null;
 function toast(msg, undo = false, typing = false) {
   const err = !undo && $('#sheet[open]:not(.closing) .form-error'); // the open sheet covers the toast
   if (err) {
-    err.textContent = msg;
+    if (err.textContent !== msg) err.textContent = msg;
+    else { err.textContent = ''; requestAnimationFrame(() => { err.textContent = msg; }); } // the same words again are only read out if they change
+    return;
+  }
+  // A modal sheet makes the page under it inert, so VoiceOver would not hear the toast; it shows once the sheet has closed.
+  const s = $('#sheet');
+  if (s.open) {
+    if (!toastLater) s.addEventListener('close', () => { const a = toastLater; toastLater = null; toast(...a); }, { once: true });
+    toastLater = [msg, undo, typing];
     return;
   }
   const t = $('#toast');
@@ -2122,7 +2148,10 @@ function toast(msg, undo = false, typing = false) {
   const hide = () => {
     t.classList.remove('show', 'has-btn');
     if (undo) { undoSnap = null; undoLive = false; }
+    toastHide = null;
+    setTimeout(() => { if (!t.classList.contains('show')) t.textContent = ''; }, 300); // after the fade, so no dead Undo is left for VoiceOver
   };
+  toastHide = hide;
   // Only a toast raised while typing waits: the phone keyboard hides it, so its 6 seconds start once no field has focus; the first look waits, as the next field takes focus only after the change event.
   const wait = () => { toastTimer = document.activeElement?.matches?.('#main input') ? setTimeout(wait, 300) : setTimeout(hide, 6000); };
   toastTimer = typing ? setTimeout(wait, 300) : setTimeout(hide, undo ? 6000 : 2200);
@@ -2695,9 +2724,9 @@ const ACT = {
     if (!next) { ui.tab = ui.screen = 'train'; ui.week = null; return render(true); }
     ACT['open-session']({ dataset: { id: next.id, date: today } });
   },
-  'settings-open': () => { ui.screen = 'settings'; ui.settingsPage = null; render(true); },
-  'settings-close': () => { ui.screen = ui.tab; ui.settingsPage = null; render(true); },
-  'settings-page': (el) => { ui.settingsPage = el.dataset.id || null; render(true); },
+  'settings-open': () => { ui.screen = 'settings'; ui.settingsPage = null; slide('push', () => render(true)); },
+  'settings-close': () => { ui.screen = ui.tab; ui.settingsPage = null; slide('pop', () => render(true)); },
+  'settings-page': (el) => { const to = el.dataset.id || null; ui.settingsPage = to; slide(to ? 'push' : 'pop', () => render(true)); },
   theme: (el) => { state.settings.theme = el.dataset.id; save(); applyTheme(); render(); },
   'weigh-open': () => showSheet(sheetWeigh()),
   'weigh-step': (el) => {
@@ -3167,9 +3196,12 @@ document.addEventListener('submit', (e) => {
   if (f.querySelector('[aria-busy="true"]') || repeated(`form:${f.dataset.form}`, e)) return;
   SUBMIT[f.dataset.form]?.(f);
 });
+// Said once typing pauses, so VoiceOver reads the latest count, not every keystroke's.
+let countTimer = null;
+const sayCount = (sel, n) => { clearTimeout(countTimer); countTimer = setTimeout(() => { const el = $(sel); if (el) el.textContent = n ? plural(n, 'match', 'matches') : 'Nothing matches'; }, 600); };
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'ex-q') { ui.exQuery = e.target.value; $('#ex-grid').innerHTML = exCards(); }
-  if (e.target.id === 'food-q') $('#food-list').innerHTML = foodListItems(e.target.value);
+  if (e.target.id === 'ex-q') { ui.exQuery = e.target.value; $('#ex-grid').innerHTML = exCards(); sayCount('#ex-count', $('#ex-grid').querySelectorAll('.ex-card').length); }
+  if (e.target.id === 'food-q') { $('#food-list').innerHTML = foodListItems(e.target.value); sayCount('#food-count', $('#food-list').querySelectorAll('[data-act^="add-"]').length); }
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches?.('input[data-act="watch"], input[data-act^="ex-"]')) e.target.blur();
